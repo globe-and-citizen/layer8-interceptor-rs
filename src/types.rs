@@ -1,15 +1,20 @@
-use std::{collections::HashMap, default};
-
-use base64::{engine::general_purpose::STANDARD as base64_enc_dec, Engine};
-use reqwest::header::{self, HeaderMap, HeaderValue};
+use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine};
+use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use wasm_bindgen::prelude::*;
 
 use crate::crypto::jwk;
 
+/// This trait defines the interface for the client that will be used to tunnel requests to the
+/// backend server.
 pub trait InterceptorClient {
+    /// Returns the URL of the client.
     fn get_url(&self) -> &Url;
-    async fn r#do(
+
+    /// Transfers the request to the backend server and returns the response. The request is
+    /// encrypted using the shared secret and the response is decrypted using the shared secret.
+    fn r#do(
         &self,
         request: &Request,
         shared_secret: &jwk,
@@ -17,7 +22,7 @@ pub trait InterceptorClient {
         is_static: bool,
         up_jwt: &str,
         uuid: &str,
-    ) -> Result<Vec<u8>, String>;
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, String>>;
 }
 
 struct Client(Url);
@@ -32,7 +37,7 @@ impl Client {
         up_jwt: &str,
         uuid: &str,
     ) -> Result<Response, String> {
-        if up_jwt == "" || uuid == "" {
+        if up_jwt.is_empty() || uuid.is_empty() {
             return Err("up_jwt and uuid are required".to_string());
         }
 
@@ -47,7 +52,7 @@ impl Client {
 fn new_client(protocol: &str, host: &str, port: u16) -> Result<impl InterceptorClient, String> {
     url::Url::parse(&format!("{}://{}:{}", protocol, host, port))
         .map_err(|e| e.to_string())
-        .map(|val| Client(val))
+        .map(Client)
 }
 
 impl InterceptorClient for Client {
@@ -164,7 +169,7 @@ impl InterceptorClient for Client {
 #[derive(Deserialize, Serialize)]
 pub struct Request {
     pub method: String,
-    pub headers: HashMap<String, String>,
+    pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
 
@@ -172,7 +177,7 @@ pub struct Request {
 pub struct Response {
     pub status: i32,
     pub status_text: String,
-    pub headers: HashMap<String, String>,
+    pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
 
@@ -186,7 +191,7 @@ struct RoundtripEnvelope {
 impl RoundtripEnvelope {
     fn encode(data: &[u8]) -> Self {
         let mut val = String::new();
-        base64_enc_dec.encode_string(&data, &mut val);
+        base64_enc_dec.encode_string(data, &mut val);
         RoundtripEnvelope { data: val }
     }
 
@@ -197,10 +202,135 @@ impl RoundtripEnvelope {
     }
 
     fn to_json_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap()
+        serde_json::to_vec(self).expect("RoundtripEnvelope implements Serialize")
     }
 
     fn from_json_bytes(data: &[u8]) -> Self {
-        serde_json::from_slice(data).unwrap()
+        serde_json::from_slice(data)
+            .expect("Error with RoundtripEnvelope deserialization, check the payload")
+    }
+}
+
+#[wasm_bindgen]
+pub struct DbCache {
+    pub(crate) store: String,
+    pub(crate) key_path: String,
+    pub(crate) indexes: Indexes,
+}
+
+#[wasm_bindgen]
+impl DbCache {
+    #[wasm_bindgen(constructor)]
+    pub fn new(store: String, key_path: String, indexes: Indexes) -> DbCache {
+        DbCache {
+            store,
+            key_path,
+            indexes,
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn store(&self) -> String {
+        self.store.clone()
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_store(&mut self, store: String) {
+        self.store = store;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn key_path(&self) -> String {
+        self.key_path.clone()
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_key_path(&mut self, key_path: String) {
+        self.key_path = key_path;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn indexes(&self) -> js_sys::Object {
+        let obj = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &obj,
+            &"url".into(),
+            &serde_wasm_bindgen::to_value(&self.indexes.url)
+                .expect("failed to serialize url index"),
+        )
+        .unwrap();
+        js_sys::Reflect::set(
+            &obj,
+            &"_exp".into(),
+            &serde_wasm_bindgen::to_value(&self.indexes._exp)
+                .expect("failed to serialize url index"),
+        )
+        .unwrap();
+        obj
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_indexes(&mut self, indexes: Indexes) {
+        self.indexes = indexes;
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Indexes {
+    pub(crate) url: Uniqueness,
+    pub(crate) _exp: Uniqueness,
+}
+
+#[wasm_bindgen]
+impl Indexes {
+    #[wasm_bindgen(constructor)]
+    pub fn new(url: Uniqueness, _exp: Uniqueness) -> Indexes {
+        Indexes { url, _exp }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn url(&self) -> Uniqueness {
+        self.url.clone()
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_url(&mut self, url: Uniqueness) {
+        self.url = url;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn _exp(&self) -> Uniqueness {
+        self._exp.clone()
+    }
+
+    #[allow(non_snake_case)] // Need the underscore to match the JS property name.
+    #[wasm_bindgen(setter)]
+    pub fn set__exp(&mut self, exp: Uniqueness) {
+        self._exp = exp;
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Uniqueness {
+    pub(crate) unique: bool,
+}
+
+#[wasm_bindgen]
+impl Uniqueness {
+    #[wasm_bindgen(constructor)]
+    pub fn new(unique: bool) -> Uniqueness {
+        Uniqueness { unique }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn unique(&self) -> bool {
+        self.unique
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_unique(&mut self, unique: bool) {
+        self.unique = unique;
     }
 }

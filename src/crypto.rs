@@ -1,6 +1,6 @@
-enum KeyType {
-    ECDSA,
-    ECDH,
+pub enum KeyType {
+    Ecdsa,
+    Ecdh,
 }
 
 pub struct jwk {
@@ -19,6 +19,10 @@ impl jwk {
     }
 
     pub fn symmetric_decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+        todo!()
+    }
+
+    pub fn export_as_base64(&self) -> Result<String, String> {
         todo!()
     }
 }
