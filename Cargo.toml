@@ -1,0 +1,18 @@
+[package]
+name = "layer8-interceptor-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Osoro Bironga <fanosoro@gmail.com>"]
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+base64 = "0.22.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2.5.2"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
+reqwest = "0.12.7"
