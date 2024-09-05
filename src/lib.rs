@@ -1,18 +1,18 @@
-use core::time;
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::{cell::Cell, collections::HashMap, str::FromStr};
 
-use crypto::generate_key_pair;
-use js_sys::Object;
-use js_sys::Promise;
-use reqwest::header::HeaderValue;
+use js_sys::{Object, Promise};
+use reqwest::header::{HeaderName, HeaderValue};
+use serde_json::json;
+use url::Url;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsValue;
 
 mod crypto;
-pub mod types;
+mod types;
+use crypto::{generate_key_pair, jwk_from_map};
+use types::new_client;
 
+/// This block imports Javascript functions that are provided by the JS Runtime.
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = log)]
@@ -21,33 +21,43 @@ extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = error)]
     fn console_error(s: &str);
 
-    #[wasm_bindgen(js_namespace = indexedDB, js_name = open)]
-    fn indexed_db_open(db_name: &str) -> Object;
-
     #[wasm_bindgen(js_namespace = Object, js_name = entries)]
     fn object_entries(obj: &Object) -> js_sys::Array;
 }
 
+/// This block import JavaScript functionality that is not mapped by the wasm-bindgen tool.
 #[wasm_bindgen(module = "src/js/indexed_db.js")]
 extern "C" {
     fn open_db(db_name: &str, db_cache: types::DbCache);
     fn clear_expired_cache(db_name: &str);
+    fn serve_static(
+        db_name: &str,
+        body: &[u8],
+        file_type: &str,
+        url: &str,
+        exp_in_seconds: u32,
+    ) -> String;
 }
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
+/// The cache time-to-live for the IndexedDB cache is 2 days.
+const INDEXED_DB_CACHE_TTL: u32 = 60 * 60 * 24 * 2; // 2 days in seconds
 
-// Global state should be "ok" since a web-assembly module is a singleton.
-lazy_static::lazy_static! {
-    static ref STATIC_PATH: Mutex<String> = Mutex::new(String::from(""));
-    static ref ENCRYPTED_TUNNEL_FLAG : Mutex<bool> = Mutex::new(false);
-    static ref COUNTER: Mutex<u32> = Mutex::new(0);
-
-    /// The cache time-to-live for the IndexedDB cache is 2 days.
-    static ref INDEXED_DB_CACHE_TTL: time::Duration = time::Duration::new(60, 0) * 60 * 24 * 2;
+thread_local! {
+    static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
+    static COUNTER: Cell<u32> = const { Cell::new(0) };
+    static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
+    static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
+    static UP_JWT: Cell<String> = Cell::new("".to_string());
+    static UUID: Cell<String> = Cell::new("".to_string());
+    static STATIC_PATH: Cell<String> = Cell::new("".to_string());
+    static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
 
     /// The cache instantiates with the `_layer8cache` IndexedDB.
-    static ref INDEXED_DBS: HashMap<String, types::DbCache> = HashMap::from([
+    static INDEXED_DBS: HashMap<String, types::DbCache> = HashMap::from([
         (
             INDEXED_DB_CACHE.to_string(),
             types::DbCache {
@@ -63,22 +73,258 @@ lazy_static::lazy_static! {
 }
 
 #[wasm_bindgen(js_name = static)]
-pub fn get_static(url: JsValue) -> Promise {
-    todo!()
+pub async fn get_static(url: JsValue) -> Promise {
+    let req_url = match url.is_string() {
+        true => Url::parse(&url.as_string().unwrap()).unwrap(),
+        false => {
+            return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
+        }
+    };
+
+    let client = L8_CLIENTS.with(|v| {
+        let val = v.take();
+        v.replace(val.clone());
+        let parsed_uri = format!("{}://{}", req_url.scheme(), req_url.host().unwrap());
+        val.get(&parsed_uri).cloned()
+    });
+
+    let static_path = STATIC_PATH.with(|v| {
+        let val = v.take();
+        v.replace(val.clone());
+        val
+    });
+
+    let host = format!("{}{}", req_url.host().unwrap(), static_path);
+
+    let json_body = {
+        let val = req_url.as_str().replacen(&host, "", 1);
+        json! {
+            {
+                "__url_path": val,
+            }
+        }
+    };
+
+    let resp = match reqwest::Client::new()
+        .get(host)
+        .body(json_body.to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())
+    {
+        Ok(val) => val,
+        Err(e) => {
+            return Promise::reject(&JsError::new(&e).into());
+        }
+    };
+
+    let header_key = HeaderName::from_str("content-type").unwrap();
+    let file_type = match resp.headers().get(&header_key) {
+        Some(val) => val.to_str().unwrap().to_string(),
+        None => {
+            return Promise::reject(&JsError::new("Content-Type header not found.").into());
+        }
+    };
+
+    let body = match resp.bytes().await.map_err(|e| e.to_string()) {
+        Ok(val) => val,
+        Err(e) => {
+            return Promise::reject(&JsError::new(&e).into());
+        }
+    };
+
+    let object_url = serve_static(
+        INDEXED_DB_CACHE,
+        &body,
+        &file_type,
+        req_url.as_str(),
+        INDEXED_DB_CACHE_TTL,
+    );
+
+    Promise::resolve(&JsValue::from(object_url))
 }
 
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
 pub fn check_encrypted_tunnel() -> Promise {
-    Promise::resolve(&JsValue::from(
-        *ENCRYPTED_TUNNEL_FLAG
-            .lock()
-            .expect("expected ENCRYPTED_TUNNEL_FLAG to be locked; qed"),
-    ))
+    Promise::resolve(&JsValue::from(ENCRYPTED_TUNNEL_FLAG.get()))
 }
 
 #[wasm_bindgen]
-pub fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
-    todo!()
+pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
+    if !ENCRYPTED_TUNNEL_FLAG.get() {
+        return Promise::reject(&JsError::new("Encrypted tunnel is closed. Reload page.").into());
+    }
+
+    let req_url = match url.is_string() {
+        true => url.as_string().unwrap(),
+        false => {
+            return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
+        }
+    };
+
+    let mut req = types::Request {
+        method: "GET".to_string(),
+        headers: HashMap::new(),
+        body: Vec::new(),
+    };
+
+    let options = if args.length() > 0 {
+        args.pop()
+    } else {
+        JsValue::null()
+    };
+
+    if !options.is_null() && !options.is_undefined() {
+        // the options object is expected to be a dictionary
+        let options = match Object::try_from(&options) {
+            Some(options) => options,
+            None => {
+                return Promise::reject(&JsError::new("Invalid options object provided.").into());
+            }
+        };
+
+        // [[key, value], ...] result from Object.entries
+        let entries = object_entries(options);
+
+        for entry in entries.iter() {
+            let val = js_sys::Array::from(&entry);
+            match val
+                .get(0)
+                .as_string()
+                .expect("key is a string; qed")
+                .as_str()
+            {
+                "method" => {
+                    req.method = val.get(1).as_string().expect("method is a string; qed");
+                }
+
+                "headers" => {
+                    let headers = match Object::try_from(&val.get(1)) {
+                        Some(val) => object_entries(val),
+                        None => {
+                            return Promise::reject(
+                                &JsError::new("Invalid options object provided.").into(),
+                            );
+                        }
+                    };
+
+                    // [[key, value], ...] result from Object.entries
+                    headers.iter().for_each(|header| {
+                        let header_entries = js_sys::Array::from(&header);
+                        req.headers.insert(
+                            header_entries
+                                .get(0)
+                                .as_string()
+                                .expect("key is a string; qed"),
+                            header_entries
+                                .get(1)
+                                .as_string()
+                                .expect("value is a string; qed"),
+                        );
+                    });
+                }
+
+                "body" => {
+                    let body = &val.get(1);
+
+                    if body.is_null() {}
+
+                    // res.body = body.to_vec();
+                }
+
+                _ => {
+                    return Promise::reject(
+                        &JsError::new("Invalid options object provided.").into(),
+                    );
+                }
+            }
+        }
+    }
+
+    let l8_client_res = L8_CLIENTS.with(|v| {
+        let val = v.take();
+        v.replace(val.clone());
+        val.get(&req_url).cloned()
+    });
+
+    let client = match l8_client_res {
+        Some(client) => client,
+        None => {
+            return Promise::reject(&JsError::new("client could not be found").into());
+        }
+    };
+
+    let res = match req
+        .headers
+        .get("Content-Type")
+        .map(|v| v.as_str())
+        .unwrap_or("application/json")
+    {
+        "application/json" => {
+            let symmetric_key = USER_SYMMETRIC_KEY.with(|v| {
+                let val = v.take();
+                v.replace(val.clone());
+                val
+            });
+
+            let symmetric_key = match symmetric_key {
+                Some(key) => key,
+                None => {
+                    return Promise::reject(&JsError::new("symmetric key not found.").into());
+                }
+            };
+
+            let up_jwt = UP_JWT.with(|v| {
+                let val = v.take();
+                v.replace(val.clone());
+                val
+            });
+
+            let uuid = UUID.with(|v| {
+                let val = v.take();
+                v.replace(val.clone());
+                val
+            });
+
+            match client
+                .r#do(&req, &symmetric_key, &req_url, false, &up_jwt, &uuid)
+                .await
+            {
+                Ok(res) => types::Response {
+                    body: res,
+                    headers: {
+                        let mut header_map = Vec::new();
+                        for (key, value) in req.headers.iter() {
+                            header_map.push((key.clone(), value.clone()));
+                        }
+                        header_map
+                    },
+                    status: 200,
+                    ..Default::default()
+                },
+                Err(e) => {
+                    return Promise::reject(&JsError::new(&e).into());
+                }
+            }
+        }
+        "multipart/form-data" => {
+            // req.body = new FormData(req.body);
+            types::Response {
+                ..Default::default() // todo: implement
+            }
+        }
+
+        // unimplemented, making the compiler happy
+        _ => types::Response {
+            ..Default::default() // todo: implement
+        },
+    };
+
+    if res.status >= 100 && res.status < 300 {
+        todo!()
+    }
+
+    Promise::resolve(&JsValue::null()) //
 }
 
 /// Test promise resolution/rejection from the console.
@@ -95,10 +341,13 @@ pub fn test_wasm(arg: JsValue) -> Promise {
 
 #[wasm_bindgen(js_name = persistenceCheck)]
 pub fn persistence_check() -> Promise {
-    let mut counter = COUNTER.lock().unwrap();
-    *counter += 1;
-    console_log(&format!("WASM Counter: {}", *counter));
-    Promise::resolve(&JsValue::from(*counter))
+    let counter = COUNTER.with(|v| {
+        v.set(v.get() + 1);
+        v.get()
+    });
+
+    console_log(&format!("WASM Counter: {}", counter));
+    Promise::resolve(&JsValue::from(counter))
 }
 
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
@@ -143,8 +392,10 @@ pub async fn init_encrypted_tunnel(args: js_sys::Array) -> Promise {
             }
 
             "staticPath" => {
-                *STATIC_PATH.lock().unwrap() =
-                    val.get(1).as_string().expect("staticPath is a string; qed")
+                STATIC_PATH.with(|v| {
+                    let path = val.get(1).as_string().expect("staticPath is a string; qed");
+                    v.replace(path);
+                });
             }
 
             _ => {
@@ -171,6 +422,9 @@ pub async fn init_encrypted_tunnel(args: js_sys::Array) -> Promise {
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     let provider_url = rebuild_url(provider);
     let (pivate_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyType::Ecdh)?;
+    PRIVATE_JWK_ECDH.with(|v| {
+        v.set(Some(pivate_jwk_ecdh.clone()));
+    });
 
     let b64_pub_jwk = pub_jwk_ecdh.export_as_base64()?;
 
@@ -196,7 +450,9 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     if res.status().eq(&401) {
-        *ENCRYPTED_TUNNEL_FLAG.lock().unwrap() = false;
+        ENCRYPTED_TUNNEL_FLAG.with(|v| {
+            v.set(false);
+        });
         return Err(String::from(
             "401 response from proxy, user is not authorized.",
         ));
@@ -205,11 +461,45 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     let mut proxy_data: HashMap<String, serde_json::Value> =
         serde_json::from_slice(&res.bytes().await.map_err(|e| e.to_string())?).unwrap();
 
-    if let Some((_, up_jwt)) = proxy_data.remove_entry("up-JWT") {
-        // to cont...
-    }
+    UP_JWT.set(
+        proxy_data
+            .remove("up_jwt")
+            .expect("expected up_jwt to be present; qed")
+            .as_str()
+            .expect("expected up_jwt to be a string; qed")
+            .to_string(),
+    );
+    USER_SYMMETRIC_KEY.replace(Some(jwk_from_map(proxy_data)?));
+    ENCRYPTED_TUNNEL_FLAG.replace(true);
 
-    todo!()
+    let proxy_url = Url::parse(&proxy).map_err(|e| e.to_string())?;
+    let port = if proxy_url.port().is_none() {
+        "443"
+    } else {
+        "80"
+    };
+
+    let provider_client = new_client(&format!(
+        "{}://{}:{}",
+        proxy_url.scheme(),
+        proxy_url.host().unwrap(),
+        port
+    ))
+    .map_err(|e| {
+        ENCRYPTED_TUNNEL_FLAG.set(false);
+        e.to_string()
+    })?;
+
+    L8_CLIENTS.with(|v| {
+        let mut map = v.take();
+        map.insert(provider.to_string(), provider_client);
+        v.replace(map);
+    });
+
+    Ok(console_log(&format!(
+        "Encrypted tunnel established with provider: {}",
+        provider
+    )))
 }
 
 fn rebuild_url(url: &str) -> String {

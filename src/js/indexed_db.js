@@ -52,3 +52,7 @@ export function clear_expired_cache(db_name) {
         );
     });
 }
+
+export function serving_static(db_name, body, file_type, url, _exp){
+    // todo: implement this function
+}

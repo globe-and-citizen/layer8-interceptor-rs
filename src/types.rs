@@ -1,36 +1,24 @@
+use std::collections::HashMap;
+
 use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine};
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasm_bindgen::prelude::*;
 
-use crate::crypto::jwk;
+use crate::crypto::Jwk;
 
-/// This trait defines the interface for the client that will be used to tunnel requests to the
-/// backend server.
-pub trait InterceptorClient {
-    /// Returns the URL of the client.
-    fn get_url(&self) -> &Url;
+#[derive(Clone)]
+pub(crate) struct Client(Url);
 
-    /// Transfers the request to the backend server and returns the response. The request is
-    /// encrypted using the shared secret and the response is decrypted using the shared secret.
-    fn r#do(
-        &self,
-        request: &Request,
-        shared_secret: &jwk,
-        backend_url: &str,
-        is_static: bool,
-        up_jwt: &str,
-        uuid: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, String>>;
+pub fn new_client(url: &str) -> Result<Client, String> {
+    url::Url::parse(url).map_err(|e| e.to_string()).map(Client)
 }
 
-struct Client(Url);
-
 impl Client {
-    async fn transfer(
+    pub async fn transfer(
         &self,
-        shared_secret: &jwk,
+        shared_secret: &Jwk,
         req: &Request,
         url: &Url,
         is_static: bool,
@@ -47,23 +35,15 @@ impl Client {
 
         serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
     }
-}
 
-fn new_client(protocol: &str, host: &str, port: u16) -> Result<impl InterceptorClient, String> {
-    url::Url::parse(&format!("{}://{}:{}", protocol, host, port))
-        .map_err(|e| e.to_string())
-        .map(Client)
-}
-
-impl InterceptorClient for Client {
-    fn get_url(&self) -> &Url {
+    pub fn get_url(&self) -> &Url {
         &self.0
     }
 
-    async fn r#do(
+    pub async fn r#do(
         &self,
         request: &Request,
-        shared_secret: &jwk,
+        shared_secret: &Jwk,
         backend_url: &str,
         is_static: bool,
         up_jwt: &str,
@@ -169,7 +149,7 @@ impl InterceptorClient for Client {
 #[derive(Deserialize, Serialize)]
 pub struct Request {
     pub method: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
 }
 

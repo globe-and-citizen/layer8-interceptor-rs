@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 pub enum KeyType {
     Ecdsa,
     Ecdh,
 }
 
-pub struct jwk {
+#[derive(Debug, Clone, Default)]
+pub struct Jwk {
     pub key_ops: Vec<String>, // ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
     pub kty: String,          // "EC", "RSA"
     pub kid: String,          // Key ID
@@ -13,7 +16,7 @@ pub struct jwk {
     pub d: String,            // d coordinate as base64 URL encoded string. Private keys only.
 }
 
-impl jwk {
+impl Jwk {
     pub fn symmetric_encrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
         todo!()
     }
@@ -27,6 +30,10 @@ impl jwk {
     }
 }
 
-pub fn generate_key_pair(key_use: KeyType) -> Result<(jwk, jwk), String> {
+pub fn generate_key_pair(key_use: KeyType) -> Result<(Jwk, Jwk), String> {
+    todo!()
+}
+
+pub fn jwk_from_map(map: HashMap<String, serde_json::Value>) -> Result<Jwk, String> {
     todo!()
 }
