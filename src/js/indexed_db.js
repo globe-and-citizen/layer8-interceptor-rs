@@ -53,6 +53,7 @@ export function clear_expired_cache(db_name) {
     });
 }
 
+// Interacts with the IndexedDB method transact with the cache
 export function serving_static(db_name, body, file_type, url, _exp){
     // todo: implement this function
 }

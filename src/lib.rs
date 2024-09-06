@@ -1,10 +1,10 @@
 use std::{cell::Cell, collections::HashMap, str::FromStr};
 
 use js_sys::{Object, Promise};
+use rand::rngs::SmallRng;
+use rand::{Rng, RngCore, SeedableRng};
 use reqwest::header::{HeaderName, HeaderValue};
-use serde_json::json;
 use url::Url;
-use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
 mod crypto;
@@ -95,47 +95,74 @@ pub async fn get_static(url: JsValue) -> Promise {
     });
 
     let host = format!("{}{}", req_url.host().unwrap(), static_path);
+    let json_body = format!(
+        "{{\"__url_path\": \"{}\"}}",
+        req_url.as_str().replacen(&host, "", 1)
+    );
 
-    let json_body = {
-        let val = req_url.as_str().replacen(&host, "", 1);
-        json! {
-            {
-                "__url_path": val,
+    let req = types::Request {
+        method: "GET".to_string(),
+        headers: HashMap::new(),
+        body: json_body.as_bytes().to_vec(),
+    };
+
+    let symmetric_key = {
+        let symmetric_key = USER_SYMMETRIC_KEY.with(|v| {
+            let val = v.take();
+            v.replace(val.clone());
+            val
+        });
+
+        match symmetric_key {
+            Some(key) => key,
+            None => {
+                return Promise::reject(&JsError::new("symmetric key not found.").into());
             }
         }
     };
 
-    let resp = match reqwest::Client::new()
-        .get(host)
-        .body(json_body.to_string())
-        .send()
-        .await
-        .map_err(|e| e.to_string())
-    {
-        Ok(val) => val,
-        Err(e) => {
-            return Promise::reject(&JsError::new(&e).into());
+    let res = {
+        let up_jwt = UP_JWT.with(|v| {
+            let val = v.take();
+            v.replace(val.clone());
+            val
+        });
+
+        let uuid = UUID.with(|v| {
+            let val = v.take();
+            v.replace(val.clone());
+            val
+        });
+
+        let res = client
+            .unwrap()
+            .r#do(&req, &symmetric_key, req_url.as_str(), true, &up_jwt, &uuid)
+            .await;
+        match res {
+            Ok(val) => val,
+            Err(e) => {
+                return Promise::reject(&JsError::new(&e).into());
+            }
         }
     };
 
-    let header_key = HeaderName::from_str("content-type").unwrap();
-    let file_type = match resp.headers().get(&header_key) {
-        Some(val) => val.to_str().unwrap().to_string(),
-        None => {
-            return Promise::reject(&JsError::new("Content-Type header not found.").into());
-        }
-    };
+    let file_type = {
+        let file_type = res
+            .headers
+            .iter()
+            .find(|(_, v)| v.trim().eq_ignore_ascii_case("Content-Type"));
 
-    let body = match resp.bytes().await.map_err(|e| e.to_string()) {
-        Ok(val) => val,
-        Err(e) => {
-            return Promise::reject(&JsError::new(&e).into());
+        match file_type {
+            Some(val) => val.1.clone(),
+            None => {
+                return Promise::reject(&JsError::new("Content-Type header not found.").into());
+            }
         }
     };
 
     let object_url = serve_static(
         INDEXED_DB_CACHE,
-        &body,
+        &res.body,
         &file_type,
         req_url.as_str(),
         INDEXED_DB_CACHE_TTL,
@@ -163,9 +190,7 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
     };
 
     let mut req = types::Request {
-        method: "GET".to_string(),
-        headers: HashMap::new(),
-        body: Vec::new(),
+        ..Default::default()
     };
 
     let options = if args.length() > 0 {
@@ -186,6 +211,115 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
         // [[key, value], ...] result from Object.entries
         let entries = object_entries(options);
 
+        // let's find the method, if none is provided, we default to "GET"
+        entries.find(&mut |entry, _, _| {
+            // [key, value] item array
+            let key_value_entry = js_sys::Array::from(&entry);
+            if key_value_entry.get(0).is_null()
+                || key_value_entry.get(0).is_undefined()
+                || !key_value_entry.get(0).is_string()
+            {
+                return false;
+            }
+
+            if key_value_entry
+                .get(0)
+                .as_string()
+                .expect("key is a string; qed")
+                .eq_ignore_ascii_case("method")
+            {
+                req.method = key_value_entry
+                    .get(1)
+                    .as_string()
+                    .unwrap_or("GET".to_string());
+                return true;
+            }
+
+            false
+        });
+
+        // let's find the headers, if none is provided, we leave as an empty hashmap
+        entries.find(&mut |entry, _, _| {
+            // [key, value] item array
+            let key_value_entry = js_sys::Array::from(&entry);
+            if key_value_entry.get(0).is_null()
+                || key_value_entry.get(0).is_undefined()
+                || !key_value_entry.get(0).is_string()
+            {
+                return false;
+            }
+
+            if key_value_entry
+                .get(0)
+                .as_string()
+                .expect("key is a string; qed")
+                .eq_ignore_ascii_case("headers")
+            {
+                // [[key, value], ...] result from Object.entries
+                let headers = object_entries(
+                    Object::try_from(&key_value_entry.get(1))
+                        .expect("expected headers to be a [key, val] object array; qed"),
+                );
+
+                headers.iter().for_each(|header| {
+                    let header_entries = js_sys::Array::from(&header);
+                    req.headers.insert(
+                        header_entries
+                            .get(0)
+                            .as_string()
+                            .expect("key is a string; qed"),
+                        header_entries
+                            .get(1)
+                            .as_string()
+                            .expect("value is a string; qed"),
+                    );
+                });
+
+                return true;
+            }
+
+            false
+        });
+
+        // if content type is not provided, we default to "application/json"
+        if req
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("Content-Type"))
+        {
+            req.headers
+                .insert("Content-Type".to_string(), "application/json".to_string());
+        }
+
+        // let's get the body
+        entries.find(&mut |entry, _, _| {
+            // [key, value] item array
+            let key_value_entry = js_sys::Array::from(&entry);
+            if key_value_entry.get(0).is_null()
+                || key_value_entry.get(0).is_undefined()
+                || !key_value_entry.get(0).is_string()
+            {
+                return false;
+            }
+
+            if key_value_entry
+                .get(0)
+                .as_string()
+                .expect("key is a string; qed")
+                .eq_ignore_ascii_case("body")
+            {
+                req.body = key_value_entry
+                    .get(1)
+                    .as_string()
+                    .expect("value is a string; qed")
+                    .as_bytes()
+                    .to_vec();
+                return true;
+            }
+
+            false
+        });
+
         for entry in entries.iter() {
             let val = js_sys::Array::from(&entry);
             match val
@@ -194,36 +328,6 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
                 .expect("key is a string; qed")
                 .as_str()
             {
-                "method" => {
-                    req.method = val.get(1).as_string().expect("method is a string; qed");
-                }
-
-                "headers" => {
-                    let headers = match Object::try_from(&val.get(1)) {
-                        Some(val) => object_entries(val),
-                        None => {
-                            return Promise::reject(
-                                &JsError::new("Invalid options object provided.").into(),
-                            );
-                        }
-                    };
-
-                    // [[key, value], ...] result from Object.entries
-                    headers.iter().for_each(|header| {
-                        let header_entries = js_sys::Array::from(&header);
-                        req.headers.insert(
-                            header_entries
-                                .get(0)
-                                .as_string()
-                                .expect("key is a string; qed"),
-                            header_entries
-                                .get(1)
-                                .as_string()
-                                .expect("value is a string; qed"),
-                        );
-                    });
-                }
-
                 "body" => {
                     let body = &val.get(1);
 
@@ -291,7 +395,7 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
                 .await
             {
                 Ok(res) => types::Response {
-                    body: res,
+                    body: res.body,
                     headers: {
                         let mut header_map = Vec::new();
                         for (key, value) in req.headers.iter() {
@@ -421,7 +525,7 @@ pub async fn init_encrypted_tunnel(args: js_sys::Array) -> Promise {
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     let provider_url = rebuild_url(provider);
-    let (pivate_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyType::Ecdh)?;
+    let (pivate_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
     PRIVATE_JWK_ECDH.with(|v| {
         v.set(Some(pivate_jwk_ecdh.clone()));
     });
@@ -435,14 +539,17 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         .body(b64_pub_jwk.clone())
         .headers({
             let mut headers = reqwest::header::HeaderMap::new();
+            let uuid = {
+                let mut small_rng = SmallRng::from_entropy();
+                small_rng.next_u32().to_string()
+            };
+            UUID.set(uuid.clone());
+
             headers.insert(
                 "x-ecdh-init",
                 HeaderValue::from_str(&b64_pub_jwk).expect(""),
             );
-            headers.insert(
-                "x-client-uuid",
-                HeaderValue::from_str(&Uuid::new_v4().to_string()).expect(""),
-            );
+            headers.insert("x-client-uuid", HeaderValue::from_str(&uuid).expect(""));
             headers
         })
         .send()

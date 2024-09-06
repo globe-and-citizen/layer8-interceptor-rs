@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine};
+use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -16,11 +16,24 @@ pub fn new_client(url: &str) -> Result<Client, String> {
 }
 
 impl Client {
-    pub async fn transfer(
+    pub(crate) async fn r#do(
         &self,
+        request: &Request,
         shared_secret: &Jwk,
-        req: &Request,
-        url: &Url,
+        backend_url: &str,
+        is_static: bool,
+        up_jwt: &str,
+        uuid: &str,
+    ) -> Result<Response, String> {
+        self.transfer(request, shared_secret, backend_url, is_static, up_jwt, uuid)
+            .await
+    }
+
+    async fn transfer(
+        &self,
+        request: &Request,
+        shared_secret: &Jwk,
+        backend_url: &str,
         is_static: bool,
         up_jwt: &str,
         uuid: &str,
@@ -30,9 +43,8 @@ impl Client {
         }
 
         let response_data = self
-            .r#do(req, shared_secret, url.as_str(), is_static, up_jwt, uuid)
+            .do_(request, shared_secret, backend_url, is_static, up_jwt, uuid)
             .await?;
-
         serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
     }
 
@@ -40,7 +52,7 @@ impl Client {
         &self.0
     }
 
-    pub async fn r#do(
+    async fn do_(
         &self,
         request: &Request,
         shared_secret: &Jwk,
@@ -146,7 +158,7 @@ impl Client {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Default)]
 pub struct Request {
     pub method: String,
     pub headers: HashMap<String, String>,
@@ -155,7 +167,7 @@ pub struct Request {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Response {
-    pub status: i32,
+    pub status: u16,
     pub status_text: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
