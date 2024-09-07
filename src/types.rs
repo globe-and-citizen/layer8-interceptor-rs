@@ -48,10 +48,6 @@ impl Client {
         serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
     }
 
-    pub fn get_url(&self) -> &Url {
-        &self.0
-    }
-
     async fn do_(
         &self,
         request: &Request,

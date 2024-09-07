@@ -1,9 +1,9 @@
-use std::{cell::Cell, collections::HashMap, str::FromStr};
+use std::{cell::Cell, collections::HashMap};
 
 use js_sys::{Object, Promise};
-use rand::rngs::SmallRng;
-use rand::{Rng, RngCore, SeedableRng};
-use reqwest::header::{HeaderName, HeaderValue};
+//use rand::rngs::SmallRng;
+use rand::{rngs::SmallRng, RngCore, SeedableRng};
+use reqwest::header::HeaderValue;
 use url::Url;
 use wasm_bindgen::prelude::*;
 
@@ -530,7 +530,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         v.set(Some(pivate_jwk_ecdh.clone()));
     });
 
-    let b64_pub_jwk = pub_jwk_ecdh.export_as_base64()?;
+    let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
 
     let proxy = format!("{proxy}/init-tunnel?backend={provider}");
 
@@ -576,6 +576,10 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
             .expect("expected up_jwt to be a string; qed")
             .to_string(),
     );
+
+    {
+        
+    }
     USER_SYMMETRIC_KEY.replace(Some(jwk_from_map(proxy_data)?));
     ENCRYPTED_TUNNEL_FLAG.replace(true);
 
