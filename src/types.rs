@@ -11,7 +11,7 @@ use crate::crypto::Jwk;
 #[derive(Clone)]
 pub(crate) struct Client(Url);
 
-pub fn new_client(url: &str) -> Result<Client, String> {
+pub(crate) fn new_client(url: &str) -> Result<Client, String> {
     url::Url::parse(url).map_err(|e| e.to_string()).map(Client)
 }
 

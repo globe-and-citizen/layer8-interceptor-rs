@@ -4,9 +4,17 @@ version = "0.0.14"
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 readme = "README.md"
+categories = ["wasm"]
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 secp256k1 = { version = "0.29.1", no-default-features = true, features = [
@@ -29,10 +37,15 @@ getrandom = { version = "0.2.8", features = [
 ] }
 aes-gcm = "0.10.3"
 
-[profile.release]
-# We want to optimize for size
-codegen-units = 1
-opt-level = "z"
-lto = true
-debug = false
-panic = "abort"
+[dev-dependencies]
+layer8-interceptor-rs = { path = "../layer8-interceptor-rs", no-default-features = true, features = [
+    "no-js",
+] }
+rstest = "0.22.0"
+
+[features]
+default = ["js", "no-js"]
+# This feature enables the wasmbindgen types and functions
+js = ["no-js"]
+# This feature exports the crypto and types from the library without the js wasm-bindgen functions, if you're interested in the crypto and types you can enable this feature
+no-js = []
