@@ -36,12 +36,14 @@ getrandom = { version = "0.2.8", features = [
     "js", # transient dependency of aes-gcm, we need the js feature 
 ] }
 aes-gcm = "0.10.3"
+uuid = { version = "1", features = ["js", "v4", "fast-rng"] }
 
 [dev-dependencies]
 layer8-interceptor-rs = { path = "../layer8-interceptor-rs", no-default-features = true, features = [
     "no-js",
 ] }
-rstest = "0.22.0"
+tokio = { version = "1", features = ["full"] }
+jsonwebtoken = "9.3.0"
 
 [features]
 default = ["js", "no-js"]

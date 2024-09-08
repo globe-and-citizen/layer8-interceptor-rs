@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Read};
+use std::collections::HashMap;
 
 use aes_gcm::{
     aead::{Aead, Nonce},
@@ -12,35 +12,40 @@ use rand::{
 use secp256k1::{ecdh::SharedSecret, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 
-pub trait KeyPairDerivative {
-    fn public_key(&self) -> Result<Option<PublicKey>, String>;
-    fn secret_key(&self) -> Result<Option<SecretKey>, String>;
-}
-
+/// Key use.
 pub enum KeyUse {
     Ecdsa,
     Ecdh,
 }
 
+/// JSON Web Key (JWK) format.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Jwk {
+    /// The operations that the key is intended to be used for.
+    /// Enum: ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
     #[serde(rename = "use")]
-    pub key_ops: Vec<String>, // ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
-    pub key_type: String, // "EC", "RSA"
-    pub key_id: String,   // Key ID
-    pub crv: String,      // "P-256"
+    pub key_ops: Vec<String>,
+    /// The key type: "EC", "RSA"
+    pub key_type: String,
+    /// The key ID
+    pub key_id: String,
+    /// The elliptic curve used with the key. Enum: ["P-256", ...]
+    pub crv: String,
+    /// The x coordinate as base64 URL encoded string.
     #[serde(rename = "x")]
-    pub coordinate_x: String, // x coordinate as base64 URL encoded string.
+    pub coordinate_x: String,
+    /// The y coordinate as base64 URL encoded string.
     #[serde(rename = "y")]
-    pub coordinate_y: String, // y coordinate as base64 URL encoded string.
+    pub coordinate_y: String,
+    /// The d coordinate as base64 URL encoded string. Private keys only.
     #[serde(rename = "d")]
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub coordinate_d: String, // d coordinate as base64 URL encoded string. Private keys only.
+    pub coordinate_d: Option<String>,
 }
 
 // AES-GCM uses a nonce size of 12 bytes. Reference: https://crypto.stackexchange.com/a/41610
 const NONCE_SIZE: usize = 12;
 
+/// This function generates a key pair of the provided key use.
 pub fn generate_key_pair(key_use: KeyUse) -> Result<(Jwk, Jwk), String> {
     let id = {
         let mut id = [0u8; 16];
@@ -59,8 +64,8 @@ pub fn generate_key_pair(key_use: KeyUse) -> Result<(Jwk, Jwk), String> {
 
     let private_jwk = {
         let private_key_use = match key_use {
-            KeyUse::Ecdh => "sign".to_string(),
-            KeyUse::Ecdsa => "deriveKey".to_string(),
+            KeyUse::Ecdh => "deriveKey".to_string(),
+            KeyUse::Ecdsa => "sign".to_string(),
         };
 
         Jwk {
@@ -68,7 +73,7 @@ pub fn generate_key_pair(key_use: KeyUse) -> Result<(Jwk, Jwk), String> {
             crv: "P-256".to_string(),
             key_id: format!("priv_{}", base64_enc_dec.encode(id)),
             key_ops: vec![private_key_use],
-            coordinate_d,
+            coordinate_d: Some(coordinate_d),
             coordinate_x: coordinate_x.clone(),
             coordinate_y: coordinate_y.clone(),
         }
@@ -76,8 +81,8 @@ pub fn generate_key_pair(key_use: KeyUse) -> Result<(Jwk, Jwk), String> {
 
     let public_jwk = {
         let pub_key_use = match key_use {
-            KeyUse::Ecdh => "verify".to_string(),
-            KeyUse::Ecdsa => "deriveKey".to_string(),
+            KeyUse::Ecdh => "deriveKey".to_string(),
+            KeyUse::Ecdsa => "verify".to_string(),
         };
 
         Jwk {
@@ -94,46 +99,9 @@ pub fn generate_key_pair(key_use: KeyUse) -> Result<(Jwk, Jwk), String> {
     Ok((private_jwk, public_jwk))
 }
 
-impl KeyPairDerivative for Jwk {
-    fn public_key(&self) -> Result<Option<PublicKey>, String> {
-        let public_key = {
-            let coordinate_x = base64_enc_dec
-                .decode(&self.coordinate_x)
-                .map_err(|e| format!("Failed to decode x coordinate: {}", e))?;
-            let coordinate_y = base64_enc_dec
-                .decode(&self.coordinate_y)
-                .map_err(|e| format!("Failed to decode y coordinate: {}", e))?;
-
-            let mut public_key_bytes = [4u8; 65];
-            public_key_bytes[1..33].copy_from_slice(&coordinate_x);
-            public_key_bytes[33..].copy_from_slice(&coordinate_y);
-
-            PublicKey::from_slice(&public_key_bytes)
-                .map_err(|e| format!("Failed to create public key: {}", e))?
-        };
-
-        Ok(Some(public_key))
-    }
-
-    fn secret_key(&self) -> Result<Option<SecretKey>, String> {
-        if self.coordinate_d.is_empty() {
-            return Ok(None);
-        }
-
-        let secret_key = {
-            let coordinate_d = base64_enc_dec
-                .decode(&self.coordinate_d)
-                .map_err(|e| format!("Failed to decode d coordinate: {}", e))?;
-            SecretKey::from_slice(&coordinate_d)
-                .map_err(|e| format!("Failed to create secret key: {}", e))?
-        };
-
-        Ok(Some(secret_key))
-    }
-}
-
 impl Jwk {
-    pub fn symmetric_encrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
+    /// This function encrypts the provided payload using the calling key.
+    pub fn symmetric_encrypt(&self, payload: &[u8]) -> Result<Vec<u8>, String> {
         if !self.key_ops.contains(&"encrypt".to_string()) {
             return Err("receiver key_ops must contain 'encrypt'".to_string());
         }
@@ -147,7 +115,7 @@ impl Jwk {
         };
 
         block_cipher
-            .encrypt(&aes_gcm::Aes256Gcm::generate_nonce(&mut OsRng), data)
+            .encrypt(&aes_gcm::Aes256Gcm::generate_nonce(&mut OsRng), payload)
             .map_err(|e| format!("Failed to encrypt data: {}", e))
     }
 
@@ -155,6 +123,7 @@ impl Jwk {
         todo!()
     }
 
+    /// This function decrypts the provided ciphertext using the calling key.
     pub fn symmetric_decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
         if ciphertext.is_empty() {
             return Err("ciphertext is empty".to_string());
@@ -180,12 +149,13 @@ impl Jwk {
         let nonce = Nonce::<aes_gcm::Aes256Gcm>::from_slice(nonce);
         block_cipher
             .decrypt(nonce, cipher_text)
-            .map_err(|e| format!("Failed to decrypt data: {}", e.to_string()))
+            .map_err(|e| format!("Failed to decrypt data: {}", e))
     }
 
+    /// This function derives a shared secret from the calling key and the provided public key.
     pub fn get_ecdh_shared_secret(&self, public_key: &Jwk) -> Result<Jwk, String> {
         // must be a public key
-        if !public_key.coordinate_d.is_empty() {
+        if !public_key.coordinate_d.is_none() {
             return Err("public key must not contain a private key".to_string());
         }
 
@@ -195,7 +165,7 @@ impl Jwk {
         }
 
         // the calling key must be a private key
-        if self.coordinate_d.is_empty() {
+        if self.coordinate_d.is_none() {
             return Err(
                 "The associated type expected a private key, does not contain coordinate_d"
                     .to_string(),
@@ -207,14 +177,8 @@ impl Jwk {
         }
 
         // getting the secret key's derivation
-        let secret_key = self
-            .secret_key()?
-            .expect("the secret key has already been validated");
-
-        let public_key = public_key
-            .public_key()?
-            .expect("the public key has already been validated");
-
+        let secret_key = self.secret_key_derivative()?;
+        let public_key = public_key.public_key_derivative()?;
         let shared_secret = SharedSecret::new(&public_key, &secret_key);
 
         Ok(Jwk {
@@ -233,6 +197,39 @@ impl Jwk {
         })
     }
 
+    /// This tries to reconstruct the public key from the x and y coordinates.
+    /// It will work for both public and private keys.
+    pub fn public_key_derivative(&self) -> Result<PublicKey, String> {
+        let coordinate_x = base64_enc_dec
+            .decode(&self.coordinate_x)
+            .map_err(|e| format!("Failed to decode x coordinate: {}", e))?;
+        let coordinate_y = base64_enc_dec
+            .decode(&self.coordinate_y)
+            .map_err(|e| format!("Failed to decode y coordinate: {}", e))?;
+
+        let mut public_key_bytes = [4u8; 65];
+        public_key_bytes[1..33].copy_from_slice(&coordinate_x);
+        public_key_bytes[33..].copy_from_slice(&coordinate_y);
+
+        PublicKey::from_slice(&public_key_bytes)
+            .map_err(|e| format!("Failed to create public key: {}", e))
+    }
+
+    /// This tries to reconstruct the secret key from the d coordinate.
+    /// It will only work for private keys.
+    pub fn secret_key_derivative(&self) -> Result<SecretKey, String> {
+        if self.coordinate_d.is_none() {
+            return Err("the Jwt does not contain a private key".to_string());
+        }
+
+        let coordinate_d = base64_enc_dec
+            .decode(&self.coordinate_d.clone().unwrap())
+            .map_err(|e| format!("Failed to decode d coordinate: {}", e))?;
+
+        SecretKey::from_slice(&coordinate_d)
+            .map_err(|e| format!("Failed to create secret key: {}", e))
+    }
+
     pub fn export_as_base64(&self) -> String {
         let jwk_json =
             serde_json::to_string(self).expect("Jwk implements Serialize and Deserialize");
@@ -248,4 +245,12 @@ pub fn jwk_from_map(map: HashMap<String, serde_json::Value>) -> Result<Jwk, Stri
 
     serde_json::from_value::<Jwk>(server_pub_key)
         .map_err(|e| format!("Failed to deserialize server_pubKeyECDH: {}", e))
+}
+
+pub fn base64_to_jwk(user_pub_jwk: &str) -> Result<Jwk, String> {
+    let user_pub_jwk_bs = base64_enc_dec
+        .decode(user_pub_jwk)
+        .map_err(|e| format!("Failure to decode userPubJWK: {}", e))?;
+    serde_json::from_slice(&user_pub_jwk_bs)
+        .map_err(|e| format!("Failure to encode userPubJWK: {}", e))
 }

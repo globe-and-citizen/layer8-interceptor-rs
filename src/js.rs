@@ -1,10 +1,10 @@
 use std::{cell::Cell, collections::HashMap};
 
 use js_sys::{Object, Promise};
-//use rand::rngs::SmallRng;
 use rand::{rngs::SmallRng, RngCore, SeedableRng};
 use reqwest::header::HeaderValue;
 use url::Url;
+use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
 use crate::crypto::{self, generate_key_pair, jwk_from_map};
@@ -23,7 +23,7 @@ extern "C" {
     fn object_entries(obj: &Object) -> js_sys::Array;
 }
 
-/// This block import JavaScript functionality that is not mapped by the wasm-bindgen tool.
+/// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
 #[wasm_bindgen(module = "src/js/indexed_db.js")]
 extern "C" {
     fn open_db(db_name: &str, db_cache: types::DbCache);
@@ -537,10 +537,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         .body(b64_pub_jwk.clone())
         .headers({
             let mut headers = reqwest::header::HeaderMap::new();
-            let uuid = {
-                let mut small_rng = SmallRng::from_entropy();
-                small_rng.next_u32().to_string()
-            };
+            let uuid = Uuid::new_v4().to_string();
             UUID.set(uuid.clone());
 
             headers.insert(
