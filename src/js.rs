@@ -1,7 +1,6 @@
 use std::{cell::Cell, collections::HashMap};
 
 use js_sys::{Object, Promise};
-use rand::{rngs::SmallRng, RngCore, SeedableRng};
 use reqwest::header::HeaderValue;
 use url::Url;
 use uuid::Uuid;
@@ -522,7 +521,7 @@ pub async fn init_encrypted_tunnel(args: js_sys::Array) -> Promise {
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
-    let provider_url = rebuild_url(provider);
+    let _provider_url = rebuild_url(provider);
     let (pivate_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
     PRIVATE_JWK_ECDH.with(|v| {
         v.set(Some(pivate_jwk_ecdh.clone()));
