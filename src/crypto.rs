@@ -155,7 +155,7 @@ impl Jwk {
     /// This function derives a shared secret from the calling key and the provided public key.
     pub fn get_ecdh_shared_secret(&self, public_key: &Jwk) -> Result<Jwk, String> {
         // must be a public key
-        if !public_key.coordinate_d.is_none() {
+        if public_key.coordinate_d.is_some() {
             return Err("public key must not contain a private key".to_string());
         }
 
@@ -223,7 +223,7 @@ impl Jwk {
         }
 
         let coordinate_d = base64_enc_dec
-            .decode(&self.coordinate_d.clone().unwrap())
+            .decode(self.coordinate_d.clone().unwrap())
             .map_err(|e| format!("Failed to decode d coordinate: {}", e))?;
 
         SecretKey::from_slice(&coordinate_d)

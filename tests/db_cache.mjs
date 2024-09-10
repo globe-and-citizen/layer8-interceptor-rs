@@ -14,7 +14,5 @@ test("db_cache_object", async (t) => {
         }],
     };
 
-    
-
     t.pass();
 })

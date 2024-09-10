@@ -41,6 +41,11 @@ layer8-interceptor-rs = { path = "../layer8-interceptor-rs", features = [
 ] }
 tokio = { version = "1", features = ["full"] }
 jsonwebtoken = "9.3.0"
+hyper = { version = "1", features = ["full"] }
+hyper-util = "0.1.8"
+tower = "0.5.1"
+http-body-util = "0.1.2"
+http = "1.1.0"
 
 [features]
 default = ["js", "no-js"]
