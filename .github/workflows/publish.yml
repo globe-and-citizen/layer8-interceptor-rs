@@ -28,7 +28,8 @@ jobs:
         run: |
           wasm-pack build --target web
           mkdir dist
-          mv pkg/* dist/   
+          mv pkg/* dist/
+          cp ./pkg/package.json .                  
     
       - name: Install npm
         uses: actions/setup-node@v2
