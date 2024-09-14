@@ -20,7 +20,7 @@ jobs:
           override-file: Cargo.toml
           target: wasm32-unknown-unknown
 
-      - name: Install wasm-pack and wasm32-unknown-unknown target
+      - name: Install wasm-pack
         run: | 
             cargo install wasm-pack
     
@@ -34,5 +34,4 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
         run: |
           wasm-pack build --target web
-          cd pkg
-          npm publish --access public --token $NPM_TOKEN --tag next --workspace layer8_interceptor_rs
+          npm publish pkg --access public --token $NPM_TOKEN --tag next
