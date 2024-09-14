@@ -1,6 +1,6 @@
 # Layer8 Interceptor
 
-This repository contains a Rust implementation of a Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>
+This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>
 
 At the time of writing this document, it is a 1:1 port of the original implementation.
 The offering for this is a smaller wasm binary size and potentially better performance.
@@ -42,7 +42,7 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 2. Next we use wasm-bindgen to generate the JavaScript bindings for our Rust code.
 
    ```sh
-   wasm-bindgen --out-dir out ./target/wasm32-unknown-unknown/release/layer8_interceptor_rs.wasm
+   wasm-bindgen --target web --out-dir out ./target/wasm32-unknown-unknown/release/layer8_interceptor_rs.wasm
    ```
 
 3. Lastly we can use wasm-opt to optimize the generated wasm file for size.
@@ -53,7 +53,9 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 
 ## Running the interceptor with an example
 
-🚧 Work in progress 🚧
+We can use the We've Got Poems example from the original Layer8 Interceptor repository to test our wasm implementation. We've changed the module used to this wasm implementation.
+
+The example can be found in the [wgp](./service_provider_mock/wgp/) directory. Navigate to it and follow the readme for a trial run.
 
 ## Tests With Code Coverage
 
