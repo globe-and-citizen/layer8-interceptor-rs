@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine};
+use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -9,18 +9,31 @@ use wasm_bindgen::prelude::*;
 use crate::crypto::Jwk;
 
 #[derive(Clone)]
-pub(crate) struct Client(Url);
+pub struct Client(Url);
 
 pub fn new_client(url: &str) -> Result<Client, String> {
     url::Url::parse(url).map_err(|e| e.to_string()).map(Client)
 }
 
 impl Client {
-    pub async fn transfer(
+    pub async fn r#do(
         &self,
+        request: &Request,
         shared_secret: &Jwk,
-        req: &Request,
-        url: &Url,
+        backend_url: &str,
+        is_static: bool,
+        up_jwt: &str,
+        uuid: &str,
+    ) -> Result<Response, String> {
+        self.transfer(request, shared_secret, backend_url, is_static, up_jwt, uuid)
+            .await
+    }
+
+    async fn transfer(
+        &self,
+        request: &Request,
+        shared_secret: &Jwk,
+        backend_url: &str,
         is_static: bool,
         up_jwt: &str,
         uuid: &str,
@@ -30,17 +43,12 @@ impl Client {
         }
 
         let response_data = self
-            .r#do(req, shared_secret, url.as_str(), is_static, up_jwt, uuid)
+            .do_(request, shared_secret, backend_url, is_static, up_jwt, uuid)
             .await?;
-
         serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
     }
 
-    pub fn get_url(&self) -> &Url {
-        &self.0
-    }
-
-    pub async fn r#do(
+    async fn do_(
         &self,
         request: &Request,
         shared_secret: &Jwk,
@@ -73,53 +81,41 @@ impl Client {
         // adding headers
         let mut header_map = reqwest::header::HeaderMap::new();
         {
-            header_map
-                .insert(
-                    "X-Forwarded-Host",
-                    url.host()
-                        .expect("expected host to be present; qed")
-                        .to_string()
-                        .parse()
-                        .expect("expected host as header value to be valid; qed"),
-                )
-                .expect("expected header to be inserted; qed");
+            header_map.insert(
+                "X-Forwarded-Host",
+                url.host()
+                    .expect("expected host to be present; qed")
+                    .to_string()
+                    .parse()
+                    .expect("expected host as header value to be valid; qed"),
+            );
 
-            header_map
-                .insert(
-                    "X-Forwarded-Proto",
-                    HeaderValue::from_str(url.scheme()).expect("expected scheme to be valid; qed"),
-                )
-                .expect("expected header to be inserted; qed");
+            header_map.insert(
+                "X-Forwarded-Proto",
+                HeaderValue::from_str(url.scheme()).expect("expected scheme to be valid; qed"),
+            );
 
-            header_map
-                .insert(
-                    "Content-Type",
-                    HeaderValue::from_str("application/json")
-                        .expect("expected content type to be valid; qed"),
-                )
-                .expect("expected header to be inserted; qed");
+            header_map.insert(
+                "Content-Type",
+                HeaderValue::from_str("application/json")
+                    .expect("expected content type to be valid; qed"),
+            );
 
-            header_map
-                .insert(
-                    "up-JWT",
-                    HeaderValue::from_str(up_jwt).expect("expected up-JWT to be valid; qed"),
-                )
-                .expect("expected header to be inserted; qed");
+            header_map.insert(
+                "up-JWT",
+                HeaderValue::from_str(up_jwt).expect("expected up-JWT to be valid; qed"),
+            );
 
-            header_map
-                .insert(
-                    "x-client-uuid",
-                    HeaderValue::from_str(uuid).expect("expected x-client-uuid to be valid; qed"),
-                )
-                .expect("expected header to be inserted; qed");
+            header_map.insert(
+                "x-client-uuid",
+                HeaderValue::from_str(uuid).expect("expected x-client-uuid to be valid; qed"),
+            );
 
             if is_static {
-                header_map
-                    .insert(
-                        "X-Static",
-                        HeaderValue::from_str("true").expect("expected X-Static to be valid; qed"),
-                    )
-                    .expect("expected header to be inserted; qed");
+                header_map.insert(
+                    "X-Static",
+                    HeaderValue::from_str("true").expect("expected X-Static to be valid; qed"),
+                );
             }
         }
 
@@ -146,7 +142,7 @@ impl Client {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Default)]
 pub struct Request {
     pub method: String,
     pub headers: HashMap<String, String>,
@@ -155,7 +151,7 @@ pub struct Request {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Response {
-    pub status: i32,
+    pub status: u16,
     pub status_text: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
