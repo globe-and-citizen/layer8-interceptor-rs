@@ -1,14 +1,13 @@
-use std::{collections::HashMap, time::SystemTime, vec};
+use std::{collections::HashMap, time::SystemTime};
 
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
 use jsonwebtoken::{EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use layer8_interceptor_rs::{
-    crypto::{generate_key_pair, jwk_from_map, Jwk, KeyUse},
-    types::{self, Request, Response},
+    crypto::{generate_key_pair, jwk_from_map, KeyUse},
+    types::{self, Request},
 };
 
 // Claims is an arbitrary struct that will be encoded to a JWT.
@@ -39,7 +38,7 @@ async fn roundtrip_test() {
     let up_jwt = resp.headers().get("up_JWT").cloned();
     let data = &resp.bytes().await.unwrap();
     let server_jwk =
-        jwk_from_map(serde_json::from_slice::<HashMap<String, Value>>(&data).unwrap()).unwrap();
+        jwk_from_map(serde_json::from_slice::<HashMap<String, Value>>(data).unwrap()).unwrap();
 
     let symmetric_key = priv_key_client.get_ecdh_shared_secret(&server_jwk).unwrap();
 
@@ -49,7 +48,7 @@ async fn roundtrip_test() {
             ("Content-Type".to_string(), "application/json".to_string()),
             ("X-Test-Header".to_string(), "test".to_string()),
         ]),
-        body: serde_json::to_vec(r#"{"test": "test"}"#).unwrap(),
+        body: br#"{"test": "test"}"#.to_vec(),
     };
 
     // doing a transfer call
@@ -61,7 +60,7 @@ async fn roundtrip_test() {
             .r#do(
                 &req,
                 &symmetric_key,
-                &backend_url,
+                backend_url,
                 false,
                 up_jwt.unwrap().to_str().unwrap(),
                 &uuid,
@@ -140,7 +139,7 @@ mod http_mock_server {
 
     impl MockServer {
         pub fn url(&self) -> String {
-            format!("http://localhost:{}", self.port)
+            format!("http://127.0.0.1:{}", self.port)
         }
 
         pub async fn close(self) -> Result<(), String> {
@@ -186,12 +185,8 @@ mod http_mock_server {
                                 let svc = hyper::service::service_fn(|req: Request<Incoming>| {
                                     let value = shared_key.clone();
                                     async move {
-                                    if req.uri().eq("/hello") {
-                                        return Ok(Response::new(Full::<Bytes>::from("Hello World")));
-                                    }
-                                    let other = url::Url::parse("https://test.layer8.com/test").unwrap();
                                     let (server_priv_key, server_pub_key) = generate_key_pair(KeyUse::Ecdh).unwrap();
-                                    router(&server_priv_key, &server_pub_key, other, value, req).await
+                                    router(&server_priv_key, &server_pub_key, value, req).await
                                 }});
                                 let svc = ServiceBuilder::new().service(svc);
                                 if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
@@ -219,7 +214,6 @@ mod http_mock_server {
     pub async fn router(
         server_priv_key: &Jwk,
         server_pub_key: &Jwk,
-        req_url: url::Url,
         shared_key: Arc<Mutex<Option<Jwk>>>,
         req: Request<Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
@@ -259,12 +253,6 @@ mod http_mock_server {
             }
 
             _ => {
-                let host = req.headers().get("X-Forwarded-Host").unwrap();
-                //assert_eq!(req_url.host_str().unwrap(), host);
-
-                let protocol = req.headers().get("X-Forwarded-Proto").unwrap();
-                //assert_eq!(req_url.scheme(), protocol);
-
                 let mut req_body = req.into_body();
                 let mut body = Vec::new();
 
@@ -286,7 +274,7 @@ mod http_mock_server {
                     .unwrap();
 
                 _ = server_priv_key
-                    .get_ecdh_shared_secret(&server_pub_key)
+                    .get_ecdh_shared_secret(server_pub_key)
                     .unwrap();
 
                 let shared_key = shared_key.lock().unwrap();
@@ -303,14 +291,9 @@ mod http_mock_server {
                 // We are only interested in the fact that the request was decrypted successfully
                 _ = serde_json::from_slice::<types::Request>(&decrypted).unwrap();
 
-                let response_body = serde_json::json!({
-                    "test": "test-response",
-                })
-                .to_string();
-
                 // encrypt and return response
                 let res = types::Response {
-                    body: response_body.as_bytes().to_vec(),
+                    body: br#"{"test": "test-response"}"#.to_vec(),
                     headers: vec![
                         ("Content-Type".to_string(), "application/json".to_string()),
                         ("X-Test-Header".to_string(), "test-response".to_string()),

@@ -23,6 +23,7 @@ The offering for this is a smaller wasm binary size and potentially better perfo
   ```
 
 - [wasm32-target]
+
   ```sh
   rustup target add wasm32-unknown-unknown
   ```
@@ -53,3 +54,33 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 ## Running the interceptor with an example
 
 🚧 Work in progress 🚧
+
+## Tests With Code Coverage
+
+To generate code coverage we use `cargo-llvm-cov`. To install it run:
+
+```sh
+cargo install cargo-llvm-cov
+```
+
+You can run code coverage by running:
+
+```sh
+cargo llvm-cov > test-coverage.txt
+```
+
+The result will be in the newly created `test-coverage.txt` file. This can be used to generate a HTML report or a `lcov.info` file.
+
+To generate a HTML report run:
+
+``` sh
+cargo llvm-cov --html --open
+```
+
+To generate a `lcov.info` file run:
+
+```sh
+cargo llvm-cov --workspace --lcov --output-path lcov.info
+```
+
+The generated `lcov.info` can be used with IDE tools like [coverage gutters](https://marketplace.visualstudio.com/items?itemName=ryanluker.vscode-coverage-gutters) to watch code coverage.

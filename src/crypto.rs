@@ -106,6 +106,8 @@ impl Jwk {
             return Err("receiver key_ops must contain 'encrypt'".to_string());
         }
 
+        let nonce = aes_gcm::Aes256Gcm::generate_nonce(&mut OsRng);
+
         let block_cipher = {
             let coordinate_x = base64_enc_dec
                 .decode(&self.coordinate_x)
@@ -114,9 +116,11 @@ impl Jwk {
                 .map_err(|e| format!("Failed to create block cipher: {}", e))?
         };
 
-        block_cipher
-            .encrypt(&aes_gcm::Aes256Gcm::generate_nonce(&mut OsRng), payload)
-            .map_err(|e| format!("Failed to encrypt data: {}", e))
+        let cipher_text = block_cipher
+            .encrypt(&nonce, payload)
+            .map_err(|e| format!("Failed to encrypt data: {}", e))?;
+
+        Ok([nonce.as_slice(), &cipher_text].concat())
     }
 
     pub fn convert_to_key_pairs(&self) -> Result<(), String> {
@@ -124,8 +128,8 @@ impl Jwk {
     }
 
     /// This function decrypts the provided ciphertext using the calling key.
-    pub fn symmetric_decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
-        if ciphertext.is_empty() {
+    pub fn symmetric_decrypt(&self, cipher_text: &[u8]) -> Result<Vec<u8>, String> {
+        if cipher_text.is_empty() {
             return Err("ciphertext is empty".to_string());
         }
 
@@ -145,7 +149,7 @@ impl Jwk {
         // |        Nonce      |   CipherText       |
         // +-------------------+--------------------+
         //  <---- 12 bytes --->
-        let (nonce, cipher_text) = ciphertext.split_at(NONCE_SIZE);
+        let (nonce, cipher_text) = cipher_text.split_at(NONCE_SIZE);
         let nonce = Nonce::<aes_gcm::Aes256Gcm>::from_slice(nonce);
         block_cipher
             .decrypt(nonce, cipher_text)

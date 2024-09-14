@@ -5,3 +5,6 @@
 .env
 .local.env
 .vscode
+
+# node modules folder in all subdirectories
+node_modules
