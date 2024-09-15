@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import layer8_interceptor from 'layer8_interceptor'
+import {fetch} from 'layer8_interceptor_rs'
  
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
 const router = useRouter();
@@ -31,7 +31,7 @@ const metaData = computed(() => {
 
 const getPoem = async () => {
   try {
-    const resp = await layer8_interceptor.fetch( BACKEND_URL + "/nextpoem");
+    const resp = await fetch( BACKEND_URL + "/nextpoem");
     let poemObj = await resp.json();
 
     if (poemObj.title) {

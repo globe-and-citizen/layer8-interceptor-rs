@@ -9,3 +9,5 @@
 
 # node modules folder in all subdirectories
 node_modules
+dist
+.DS_Store

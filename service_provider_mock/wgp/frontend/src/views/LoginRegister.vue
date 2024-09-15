@@ -3,7 +3,8 @@
 import { computed, ref } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import layer8_interceptor from 'layer8_interceptor'
+import {fetch as interceptor_fetch} from 'layer8_interceptor_rs'
+
 
 // Variables
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
@@ -24,7 +25,7 @@ const isLoading = ref(false);
 // Functions
 const registerUser = async () => {
   try {
-    let resp = await layer8_interceptor.fetch(BACKEND_URL + "/api/register", {
+    let resp = await interceptor_fetch(BACKEND_URL + "/api/register", {
       method: "POST",
       headers: {
         "Content-Type": "Application/Json",
@@ -51,7 +52,7 @@ const loginUser = async () => {
   }
 
   try {
-    const response = await layer8_interceptor.fetch(BACKEND_URL + "/api/login", {
+    const response = await interceptor_fetch(BACKEND_URL + "/api/login", {
       method: "POST",
       headers: {
         "Content-Type": "Application/Json",
@@ -99,7 +100,7 @@ const userName = computed(() => {
 });
 
 const loginWithLayer8Popup = async () => {
-  const response = await layer8_interceptor.fetch(BACKEND_URL + "/api/login/layer8/auth")
+  const response = await interceptor_fetch(BACKEND_URL + "/api/login/layer8/auth")
   const data = await response.json()
   // create opener window
   const popup = window.open(data.authURL, "Login with Layer8", "width=600,height=600");

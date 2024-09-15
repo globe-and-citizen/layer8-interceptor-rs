@@ -1,22 +1,22 @@
 <script setup>
 import { ref } from "vue";
 import Navbar from "../components/Navbar.vue";
-import layer8_interceptor from 'layer8_interceptor'
+import {testWASM, static_, checkEncryptedTunnel, fetch} from 'layer8_interceptor_rs'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
 const requestsSent = ref(0);
 const totalTimeSpent = ref(0);
 const numberOfRequest = ref(0)
 
-console.log("verdict 1: ", layer8_interceptor.checkEncryptedTunnel())
+console.log("verdict 1: ", checkEncryptedTunnel())
 setTimeout(()=>{
-  console.log("verdict 2: ", layer8_interceptor.checkEncryptedTunnel())
+  console.log("verdict 2: ", checkEncryptedTunnel())
 }, 1000)
 
 async function testWASMHandler() {
   const startTime = performance.now();
   for (let i = 0; i < numberOfRequest.value; i++) {
-    const res = await layer8_interceptor.testWASM(i, "42");
+    const res = await testWASM(i, "42");
     requestsSent.value++;
     console.log(res);
   }
@@ -29,7 +29,7 @@ async function testWASMHandler() {
 async function getError(){
   try {
     console.log("Error Test")
-    await layer8_interceptor.fetch(BACKEND_URL + "/error", {
+    await fetch(BACKEND_URL + "/error", {
       method: "POST",
       headers: {
         "Content-Type": "Application/Json",
@@ -50,7 +50,7 @@ async function getNextPicture() {
     BACKEND_URL + '/media/boy.png',
     BACKEND_URL + '/media/girl.png'
   ]
-  let url = await layer8_interceptor.static(pictureURLs[idx]);
+  let url = await static_(pictureURLs[idx]);
   const element = document.getElementById("pictureBox");
   element.src = url;
   x++

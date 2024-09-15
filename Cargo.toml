@@ -1,6 +1,6 @@
 [package]
 name = "layer8-interceptor-rs"
-version = "0.0.1"                                                                                                                                               # Keeping the version in sync with the JS version
+version = "0.0.1"                                                                                                                                                # Keeping the version in sync with the JS version
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
@@ -37,6 +37,7 @@ getrandom = { version = "0.2.8", features = [
 ] }
 aes-gcm = "0.10.3"
 uuid = { version = "1", features = ["js", "v4", "fast-rng"] }
+web-sys = { version = "0.3.70", features = ["FormData", "File", "Headers", "Response"] }
 
 [dev-dependencies]
 layer8-interceptor-rs = { path = "../layer8-interceptor-rs", features = [
@@ -49,6 +50,7 @@ hyper-util = "0.1.8"
 tower = "0.5.1"
 http-body-util = "0.1.2"
 http = "1.1.0"
+wasm-bindgen-test = "0.3"
 
 [features]
 default = ["js", "no-js"]

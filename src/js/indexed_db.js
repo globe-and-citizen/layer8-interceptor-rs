@@ -1,5 +1,3 @@
-"use strict";
-
 // We have this here as there is no native support for IndexedDB in wasm_bindgen
 // TODO: https://github.com/rustwasm/gloo/issues/68#issuecomment-606951683
 export function open_db(db_name, db_cache) {
@@ -48,12 +46,27 @@ export function clear_expired_cache(db_name) {
                 store.delete(cursor.primaryKey);
                 cursor.continue();
             }
-        }
-        );
+        });
     });
 }
 
 // Interacts with the IndexedDB method transact with the cache
-export function serving_static(db_name, body, file_type, url, _exp){
-    // todo: implement this function
+export function serve_static(db_name, body, file_type, url, _exp){
+    let db = open_db(db_name, null);
+    db.onsuccess(function (event) {
+        var db = event.target.result;
+        var transaction = db.transaction("static", "readwrite");
+        var store = transaction.objectStore("static");
+
+        store.put({
+            url: url,
+            body: body,
+            type: file_type,
+            _exp: _exp
+        });
+    });
+
+    return new Blob([JSON.stringify(body, null, 2)], {
+        type: file_type,
+    });
 }
