@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{Aead, Nonce},
     AeadCore, KeyInit,
 };
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
+use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use rand::{
     rngs::{OsRng, StdRng},
     Rng, SeedableRng,
@@ -26,8 +26,10 @@ pub struct Jwk {
     #[serde(rename = "use")]
     pub key_ops: Vec<String>,
     /// The key type: "EC", "RSA"
+    #[serde(rename = "kty")]
     pub key_type: String,
     /// The key ID
+    #[serde(rename = "kid")]
     pub key_id: String,
     /// The elliptic curve used with the key. Enum: ["P-256", ...]
     pub crv: String,

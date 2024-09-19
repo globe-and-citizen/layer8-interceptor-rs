@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
+use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -187,6 +187,7 @@ impl RoundtripEnvelope {
     }
 }
 
+#[derive(Clone)]
 #[wasm_bindgen]
 pub struct DbCache {
     pub(crate) store: String,

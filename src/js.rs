@@ -1,6 +1,6 @@
 use std::{cell::Cell, collections::HashMap};
 
-use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
+use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{ArrayBuffer, Object, Promise, Uint8Array};
 use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
@@ -35,7 +35,7 @@ extern "C" {
 #[wasm_bindgen(module = "/src/js/indexed_db.js")]
 extern "C" {
     fn open_db(db_name: &str, db_cache: types::DbCache);
-    fn clear_expired_cache(db_name: &str);
+    fn clear_expired_cache(db_name: &str, db_cache: types::DbCache);
     fn serve_static(
         db_name: &str,
         body: &[u8],
@@ -177,6 +177,7 @@ pub async fn get_static(url: JsValue) -> Promise {
     Promise::resolve(&JsValue::from(object_url))
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
 pub fn check_encrypted_tunnel() -> Promise {
     Promise::resolve(&JsValue::from(ENCRYPTED_TUNNEL_FLAG.get()))
@@ -630,6 +631,7 @@ fn get_constructor_name(obj: &JsValue) -> String {
 }
 
 /// Test promise resolution/rejection from the console.
+#[allow(non_snake_case)]
 #[wasm_bindgen(js_name = testWASM)]
 pub fn test_wasm(arg: JsValue) -> Promise {
     if arg.is_null() || arg.is_undefined() {
@@ -641,6 +643,7 @@ pub fn test_wasm(arg: JsValue) -> Promise {
     Promise::resolve(&JsValue::from(msg))
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
 pub fn persistence_check() -> Promise {
     let counter = COUNTER.with(|v| {
@@ -652,23 +655,31 @@ pub fn persistence_check() -> Promise {
     Promise::resolve(&JsValue::from(counter))
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(args: js_sys::Array) -> Promise {
+pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -> Promise {
     let mut providers = Vec::new();
     let mut proxy = "https://layer8devproxy.net".to_string(); // set LAYER8_PROXY in the environment to override
     let mut mode = "prod".to_string();
     if args.length() > 1 {
         mode = args
-            .get(1)
             .as_string()
             .expect("the mode expected to be a string; qed");
     }
 
     // clear cache; TODO: is there some form of concurrency to do this in the background?
-    clear_expired_cache(INDEXED_DB_CACHE);
+
+    let cache = INDEXED_DBS.with(|v| {
+        let val = v
+            .get(INDEXED_DB_CACHE)
+            .expect("expected indexed db to be present; qed");
+        val.clone()
+    });
+
+    clear_expired_cache(INDEXED_DB_CACHE, cache);
 
     let mut error_destructuring = false;
-    let entries = object_entries(&js_sys::global());
+    let entries = object_entries(&this_);
     for entry in entries.iter() {
         let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
         match val
