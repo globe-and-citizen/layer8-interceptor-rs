@@ -195,6 +195,7 @@ pub struct DbCache {
     pub(crate) indexes: Indexes,
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen]
 impl DbCache {
     #[wasm_bindgen(constructor)]
@@ -259,6 +260,7 @@ pub struct Indexes {
     pub(crate) _exp: Uniqueness,
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen]
 impl Indexes {
     #[wasm_bindgen(constructor)]
@@ -294,6 +296,7 @@ pub struct Uniqueness {
     pub(crate) unique: bool,
 }
 
+#[allow(non_snake_case)]
 #[wasm_bindgen]
 impl Uniqueness {
     #[wasm_bindgen(constructor)]
