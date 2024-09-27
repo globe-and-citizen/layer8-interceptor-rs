@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # install project dependencies
-RUN npm install && npm i layer8_interceptor
+RUN npm install && npm i layer8_interceptor_rs
 
 # copy project files and folders to the current working directory (i.e. 'app' folder)
 COPY . .

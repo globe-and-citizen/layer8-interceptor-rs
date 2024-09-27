@@ -113,7 +113,7 @@ mod http_mock_server {
         sync::{Arc, Mutex},
     };
 
-    use base64::{self, engine::general_purpose::STANDARD as base64_enc_dec, Engine as _};
+    use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
     use http_body_util::{BodyExt, Full};
     use hyper::{
         body::{Body, Bytes, Incoming},

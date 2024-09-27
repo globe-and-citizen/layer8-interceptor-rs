@@ -1,13 +1,13 @@
 <script setup>
 import { RouterView } from "vue-router";
-import layer8_interceptor from 'layer8_interceptor'
+import { initEncryptedTunnel } from 'layer8-interceptor-rs'
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
 const PROXY_URL =  import.meta.env.VITE_PROXY_URL
 
 try{
-  layer8_interceptor.initEncryptedTunnel({
+  initEncryptedTunnel({
     providers: [BACKEND_URL],
-    proxy: PROXY_URL // works
+    proxy: PROXY_URL
   }, "dev")
 }catch(err){
   console.log(".initEncryptedTunnel error: ", err)
@@ -22,5 +22,3 @@ try{
 
 <style scoped>
 </style>
-
-
