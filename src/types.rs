@@ -25,8 +25,7 @@ impl Client {
         up_jwt: &str,
         uuid: &str,
     ) -> Result<Response, String> {
-        self.transfer(request, shared_secret, backend_url, is_static, up_jwt, uuid)
-            .await
+        self.transfer(request, shared_secret, backend_url, is_static, up_jwt, uuid).await
     }
 
     async fn transfer(
@@ -42,9 +41,7 @@ impl Client {
             return Err("up_jwt and uuid are required".to_string());
         }
 
-        let response_data = self
-            .do_(request, shared_secret, backend_url, is_static, up_jwt, uuid)
-            .await?;
+        let response_data = self.do_(request, shared_secret, backend_url, is_static, up_jwt, uuid).await?;
         serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
     }
 
@@ -59,10 +56,7 @@ impl Client {
     ) -> Result<Vec<u8>, String> {
         let request_data = RoundtripEnvelope::encode(
             &shared_secret
-                .symmetric_encrypt(
-                    &serde_json::to_vec(request)
-                        .map_err(|e| format!("Failed to serialize request: {}", e))?,
-                )
+                .symmetric_encrypt(&serde_json::to_vec(request).map_err(|e| format!("Failed to serialize request: {}", e))?)
                 .map_err(|e| format!("Failed to encrypt request: {}", e))?,
         )
         .to_json_bytes();
@@ -97,14 +91,10 @@ impl Client {
 
             header_map.insert(
                 "Content-Type",
-                HeaderValue::from_str("application/json")
-                    .expect("expected content type to be valid; qed"),
+                HeaderValue::from_str("application/json").expect("expected content type to be valid; qed"),
             );
 
-            header_map.insert(
-                "up-JWT",
-                HeaderValue::from_str(up_jwt).expect("expected up-JWT to be valid; qed"),
-            );
+            header_map.insert("up-JWT", HeaderValue::from_str(up_jwt).expect("expected up-JWT to be valid; qed"));
 
             header_map.insert(
                 "x-client-uuid",
@@ -112,10 +102,7 @@ impl Client {
             );
 
             if is_static {
-                header_map.insert(
-                    "X-Static",
-                    HeaderValue::from_str("true").expect("expected X-Static to be valid; qed"),
-                );
+                header_map.insert("X-Static", HeaderValue::from_str("true").expect("expected X-Static to be valid; qed"));
             }
         }
 
@@ -127,10 +114,7 @@ impl Client {
             .await
             .map_err(|e| format!("Failed to send request: {}", e))?;
 
-        let body = server_resp
-            .bytes()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+        let body = server_resp.bytes().await.map_err(|e| format!("Failed to read response: {}", e))?;
 
         let response_data = RoundtripEnvelope::from_json_bytes(&body)
             .decode()
@@ -182,8 +166,7 @@ impl RoundtripEnvelope {
     }
 
     fn from_json_bytes(data: &[u8]) -> Self {
-        serde_json::from_slice(data)
-            .expect("Error with RoundtripEnvelope deserialization, check the payload")
+        serde_json::from_slice(data).expect("Error with RoundtripEnvelope deserialization, check the payload")
     }
 }
 
@@ -200,11 +183,7 @@ pub struct DbCache {
 impl DbCache {
     #[wasm_bindgen(constructor)]
     pub fn new(store: String, key_path: String, indexes: Indexes) -> DbCache {
-        DbCache {
-            store,
-            key_path,
-            indexes,
-        }
+        DbCache { store, key_path, indexes }
     }
 
     #[wasm_bindgen(getter)]
@@ -233,15 +212,13 @@ impl DbCache {
         js_sys::Reflect::set(
             &obj,
             &"url".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes.url)
-                .expect("failed to serialize url index"),
+            &serde_wasm_bindgen::to_value(&self.indexes.url).expect("failed to serialize url index"),
         )
         .unwrap();
         js_sys::Reflect::set(
             &obj,
             &"_exp".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes._exp)
-                .expect("failed to serialize url index"),
+            &serde_wasm_bindgen::to_value(&self.indexes._exp).expect("failed to serialize url index"),
         )
         .unwrap();
         obj

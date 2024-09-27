@@ -114,8 +114,7 @@ impl Jwk {
             let coordinate_x = base64_enc_dec
                 .decode(&self.coordinate_x)
                 .map_err(|e| format!("Failed to decode x coordinate: {}", e))?;
-            aes_gcm::Aes256Gcm::new_from_slice(&coordinate_x)
-                .map_err(|e| format!("Failed to create block cipher: {}", e))?
+            aes_gcm::Aes256Gcm::new_from_slice(&coordinate_x).map_err(|e| format!("Failed to create block cipher: {}", e))?
         };
 
         let cipher_text = block_cipher
@@ -143,8 +142,7 @@ impl Jwk {
             let coordinate_x = base64_enc_dec
                 .decode(&self.coordinate_x)
                 .map_err(|e| format!("Failed to decode x coordinate: {}", e))?;
-            aes_gcm::Aes256Gcm::new_from_slice(&coordinate_x)
-                .map_err(|e| format!("Failed to create block cipher: {}", e))?
+            aes_gcm::Aes256Gcm::new_from_slice(&coordinate_x).map_err(|e| format!("Failed to create block cipher: {}", e))?
         };
 
         // +-------------------+--------------------+
@@ -172,10 +170,7 @@ impl Jwk {
 
         // the calling key must be a private key
         if self.coordinate_d.is_none() {
-            return Err(
-                "The associated type expected a private key, does not contain coordinate_d"
-                    .to_string(),
-            );
+            return Err("The associated type expected a private key, does not contain coordinate_d".to_string());
         }
 
         if !self.key_ops.contains(&"deriveKey".to_string()) {
@@ -217,8 +212,7 @@ impl Jwk {
         public_key_bytes[1..33].copy_from_slice(&coordinate_x);
         public_key_bytes[33..].copy_from_slice(&coordinate_y);
 
-        PublicKey::from_slice(&public_key_bytes)
-            .map_err(|e| format!("Failed to create public key: {}", e))
+        PublicKey::from_slice(&public_key_bytes).map_err(|e| format!("Failed to create public key: {}", e))
     }
 
     /// This tries to reconstruct the secret key from the d coordinate.
@@ -232,31 +226,24 @@ impl Jwk {
             .decode(self.coordinate_d.clone().unwrap())
             .map_err(|e| format!("Failed to decode d coordinate: {}", e))?;
 
-        SecretKey::from_slice(&coordinate_d)
-            .map_err(|e| format!("Failed to create secret key: {}", e))
+        SecretKey::from_slice(&coordinate_d).map_err(|e| format!("Failed to create secret key: {}", e))
     }
 
     pub fn export_as_base64(&self) -> String {
-        let jwk_json =
-            serde_json::to_string(self).expect("Jwk implements Serialize and Deserialize");
+        let jwk_json = serde_json::to_string(self).expect("Jwk implements Serialize and Deserialize");
         base64_enc_dec.encode(jwk_json.as_bytes())
     }
 }
 
 pub fn jwk_from_map(map: HashMap<String, serde_json::Value>) -> Result<Jwk, String> {
-    let server_pub_key = map
-        .get("server_pubKeyECDH")
-        .ok_or("server_pubKeyECDH not found")?
-        .clone();
+    let server_pub_key = map.get("server_pubKeyECDH").ok_or("server_pubKeyECDH not found")?.clone();
 
-    serde_json::from_value::<Jwk>(server_pub_key)
-        .map_err(|e| format!("Failed to deserialize server_pubKeyECDH: {}", e))
+    serde_json::from_value::<Jwk>(server_pub_key).map_err(|e| format!("Failed to deserialize server_pubKeyECDH: {}", e))
 }
 
 pub fn base64_to_jwk(user_pub_jwk: &str) -> Result<Jwk, String> {
     let user_pub_jwk_bs = base64_enc_dec
         .decode(user_pub_jwk)
         .map_err(|e| format!("Failure to decode userPubJWK: {}", e))?;
-    serde_json::from_slice(&user_pub_jwk_bs)
-        .map_err(|e| format!("Failure to encode userPubJWK: {}", e))
+    serde_json::from_slice(&user_pub_jwk_bs).map_err(|e| format!("Failure to encode userPubJWK: {}", e))
 }
