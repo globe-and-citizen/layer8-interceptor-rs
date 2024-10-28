@@ -38,7 +38,8 @@ async fn roundtrip_test() {
     let up_jwt = resp.headers().get("up_JWT").cloned();
     let data = &resp.bytes().await.unwrap();
     let server_jwk =
-        jwk_from_map(serde_json::from_slice::<HashMap<String, Value>>(data).unwrap()).unwrap();
+        jwk_from_map(serde_json::from_slice::<serde_json::Map<String, Value>>(data).unwrap())
+            .unwrap();
 
     let symmetric_key = priv_key_client.get_ecdh_shared_secret(&server_jwk).unwrap();
 

@@ -81,12 +81,16 @@ pub async fn get_static(url: JsValue) -> Promise {
         }
     };
 
+    console_log(&format!("Fetching static file: {}", req_url.as_str()));
+
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        let parsed_uri = format!("{}://{}", req_url.scheme(), req_url.host().unwrap());
-        val.get(&parsed_uri).cloned()
+        console_log(&format!("Parsed URI: {}", &rebuild_url(&req_url.to_string())));
+        val.get(&rebuild_url(&req_url.to_string())).cloned()
     });
+
+    console_log(&format!("Client: {:?}", client));
 
     let static_path = STATIC_PATH.with(|v| {
         let val = v.take();
@@ -163,7 +167,7 @@ pub fn check_encrypted_tunnel() -> Promise {
 }
 
 #[wasm_bindgen]
-pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
+pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     if !ENCRYPTED_TUNNEL_FLAG.get() {
         return Promise::reject(&JsError::new("Encrypted tunnel is closed. Reload page.").into());
     }
@@ -175,14 +179,15 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
         }
     };
 
-    let mut req = types::Request { ..Default::default() };
-
-    let options = if args.length() > 0 { args.pop() } else { JsValue::null() };
+    let mut req = types::Request {
+        method: "GET".to_string(),
+        ..Default::default()
+    };
 
     let mut js_body = JsValue::null();
-    if !options.is_null() && !options.is_undefined() {
+    if !args.is_null() && !args.is_undefined() {
         // the options object is expected to be a dictionary
-        let options = match Object::try_from(&options) {
+        let options = match Object::try_from(&args) {
             Some(options) => options,
             None => {
                 return Promise::reject(&JsError::new("Invalid options object provided.").into());
@@ -192,80 +197,51 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
         // [[key, value], ...] result from Object.entries
         let entries = object_entries(options);
 
-        // let's find the method, if none is provided, we default to "GET"
-        entries.find(&mut |entry, _, _| {
+        for entry in entries.iter() {
             // [key, value] item array
             let key_value_entry = js_sys::Array::from(&entry);
             if key_value_entry.get(0).is_null() || key_value_entry.get(0).is_undefined() || !key_value_entry.get(0).is_string() {
-                return false;
+                continue;
             }
 
-            if key_value_entry
-                .get(0)
-                .as_string()
-                .expect("key is a string; qed")
-                .eq_ignore_ascii_case("method")
-            {
-                req.method = key_value_entry.get(1).as_string().unwrap_or("GET".to_string());
-                return true;
+            let key = key_value_entry.get(0).as_string().expect("key is a string; qed");
+
+            match key.to_lowercase().as_str() {
+                "method" => {
+                    req.method = key_value_entry.get(1).as_string().unwrap_or("GET".to_string());
+                }
+                "headers" => {
+                    let headers =
+                        object_entries(Object::try_from(&key_value_entry.get(1)).expect("expected headers to be a [key, val] object array; qed"));
+
+                    headers.iter().for_each(|header| {
+                        let header_entries = js_sys::Array::from(&header);
+                        req.headers.insert(
+                            header_entries.get(0).as_string().expect("key is a string; qed"),
+                            header_entries.get(1).as_string().expect("value is a string; qed"),
+                        );
+                    });
+                }
+                "body" => {
+                    js_body = key_value_entry.get(1);
+                    if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
+                        req.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
+                    }
+                }
+                _ => {}
             }
-
-            false
-        });
-
-        // let's find the headers, if none is provided, we leave as an empty hashmap
-        entries.find(&mut |entry, _, _| {
-            // [key, value] item array
-            let key_value_entry = js_sys::Array::from(&entry);
-            if key_value_entry.get(0).is_null() || key_value_entry.get(0).is_undefined() || !key_value_entry.get(0).is_string() {
-                return false;
-            }
-
-            if key_value_entry
-                .get(0)
-                .as_string()
-                .expect("key is a string; qed")
-                .eq_ignore_ascii_case("headers")
-            {
-                // [[key, value], ...] result from Object.entries
-                let headers =
-                    object_entries(Object::try_from(&key_value_entry.get(1)).expect("expected headers to be a [key, val] object array; qed"));
-
-                headers.iter().for_each(|header| {
-                    let header_entries = js_sys::Array::from(&header);
-                    req.headers.insert(
-                        header_entries.get(0).as_string().expect("key is a string; qed"),
-                        header_entries.get(1).as_string().expect("value is a string; qed"),
-                    );
-                });
-
-                return true;
-            }
-
-            false
-        });
-
-        // if content type is not provided, we default to "application/json"
-        if req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("Content-Type")) {
-            req.headers.insert("Content-Type".to_string(), "application/json".to_string());
         }
 
-        // let's get the body
-        for entry in entries.iter() {
-            let val = js_sys::Array::from(&entry);
-            if val.get(0).as_string().expect("key is a string; qed").as_str() == "body" {
-                js_body = val.get(1);
-                if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
-                    req.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
-                }
-            }
+        // if content type is not provided, we default to "application/json"
+        if !req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("Content-Type")) {
+            req.headers.insert("Content-Type".to_string(), "application/json".to_string());
         }
     }
 
     let l8_client_res = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        val.get(&req_url).cloned()
+        val.get(&rebuild_url(&req_url)).cloned()
     });
 
     let client = match l8_client_res {
@@ -309,7 +285,12 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
                 val
             });
 
-            match client.r#do(&req, &symmetric_key, &req_url, false, &up_jwt, &uuid).await {
+            // the js_body is expected to be a valid json string
+            if !js_body.is_null() && !js_body.is_undefined() {
+                req.body = js_body.as_string().expect("expected body to be a string; qed").as_bytes().to_vec();
+            }
+
+            match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
                 Ok(res) => types::Response {
                     body: res.body,
                     headers: {
@@ -331,7 +312,7 @@ pub async fn fetch(url: JsValue, args: js_sys::Array) -> Promise {
             req.headers
                 .insert("Content-Type".to_string(), "application/layer8.buffer+json".to_string());
 
-            if req.body.is_empty() {
+            if js_body.is_null() || js_body.is_undefined() {
                 return Promise::reject(&JsError::new("No body provided to fetch call.").into());
             }
 
@@ -557,15 +538,14 @@ pub fn persistence_check() -> Promise {
 
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -> Promise {
+pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -> JsValue {
     let mut providers = Vec::new();
-    let mut proxy = "https://layer8devproxy.net".to_string(); // set LAYER8_PROXY in the environment to override
+    // let mut proxy = "https://layer8devproxy.net".to_string(); // set LAYER8_PROXY in the environment to override
+    let mut proxy = "http://localhost:5001".to_string();
     let mut mode = "prod".to_string();
     if args.length() > 1 {
         mode = args.as_string().expect("the mode expected to be a string; qed");
     }
-
-    // clear cache; TODO: is there some form of concurrency to do this in the background?
 
     let cache = INDEXED_DBS.with(|v| {
         let val = v.get(INDEXED_DB_CACHE).expect("expected indexed db to be present; qed");
@@ -610,24 +590,34 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
 
     if error_destructuring {
         let err = JsError::new("Unable to destructure the layer8 encrypted object.");
-        return Promise::reject(&err.into());
+        console_log(&format!("Error: unable to destructure the layer8 encrypted object."));
+        return Promise::reject(&err.into()).into();
     }
 
-    for provider in providers {
+    for provider in providers.clone() {
+        console_log(&format!("Establishing encrypted tunnel with provider: {}", provider));
         if let Err(err) = init_tunnel(&provider, &proxy).await {
+            console_error(&format!(
+                "Failed to establish encrypted tunnel with provider: {}. Error: {}",
+                provider, err
+            ));
             let err = JsError::new(&err);
-            return Promise::reject(&err.into());
+            return Promise::reject(&err.into()).into();
+        } else {
+            console_log(&format!("Encrypted tunnel established with provider: {}", provider));
         }
     }
 
-    Promise::resolve(&JsValue::null())
+    console_log(&format!("Encrypted tunnel established with providers: {:?}", providers));
+    Promise::resolve(&JsValue::null()).into()
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     let _provider_url = rebuild_url(provider);
-    let (pivate_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
+    let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
+
     PRIVATE_JWK_ECDH.with(|v| {
-        v.set(Some(pivate_jwk_ecdh.clone()));
+        v.set(Some(private_jwk_ecdh.clone()));
     });
 
     let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
@@ -648,7 +638,10 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         })
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            console_log(&format!("Failed to send request: {}", e));
+            e.to_string()
+        })?;
 
     if res.status().eq(&401) {
         ENCRYPTED_TUNNEL_FLAG.with(|v| {
@@ -657,25 +650,37 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         return Err(String::from("401 response from proxy, user is not authorized."));
     }
 
-    let mut proxy_data: HashMap<String, serde_json::Value> = serde_json::from_slice(&res.bytes().await.map_err(|e| e.to_string())?).unwrap();
+    let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&res.bytes().await.map_err(|e| {
+        console_log(&format!("Failed to read response: {}", e));
+        e.to_string()
+    })?)
+    .map_err(|val| {
+        console_log(&format!("Failed to decode response: {}", val));
+        val.to_string()
+    })?;
 
     UP_JWT.set(
         proxy_data
-            .remove("up_jwt")
-            .expect("expected up_jwt to be present; qed")
+            .remove("up-JWT")
+            .ok_or("up_jwt not found")?
             .as_str()
-            .expect("expected up_jwt to be a string; qed")
+            .ok_or("expected up_jwt to be a string")?
             .to_string(),
     );
 
-    {}
-    USER_SYMMETRIC_KEY.replace(Some(jwk_from_map(proxy_data)?));
+    USER_SYMMETRIC_KEY.replace(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
     ENCRYPTED_TUNNEL_FLAG.replace(true);
 
     let proxy_url = Url::parse(&proxy).map_err(|e| e.to_string())?;
-    let port = if proxy_url.port().is_none() { "443" } else { "80" };
 
-    let provider_client = new_client(&format!("{}://{}:{}", proxy_url.scheme(), proxy_url.host().unwrap(), port)).map_err(|e| {
+    let url_proxy_ = &format!(
+        "{}://{}:{}",
+        proxy_url.scheme(),
+        proxy_url.host().expect("expected host to be present; qed"),
+        proxy_url.port().unwrap_or(443)
+    );
+
+    let provider_client = new_client(&url_proxy_).map_err(|e| {
         ENCRYPTED_TUNNEL_FLAG.set(false);
         e.to_string()
     })?;

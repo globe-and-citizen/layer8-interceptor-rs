@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use reqwest::header::HeaderValue;
@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::crypto::Jwk;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client(Url);
 
 pub fn new_client(url: &str) -> Result<Client, String> {
@@ -72,14 +72,18 @@ impl Client {
             }
         };
 
+        // if port is present, let's add it to the url
+        let port = match Url::parse(backend_url).map_err(|e| e.to_string())?.port() {
+            Some(port) => format!(":{}", port),
+            None => "".to_string(),
+        };
+
         // adding headers
         let mut header_map = reqwest::header::HeaderMap::new();
         {
             header_map.insert(
                 "X-Forwarded-Host",
-                url.host()
-                    .expect("expected host to be present; qed")
-                    .to_string()
+                format!("{}{}", url.host().expect("expected host to be present; qed").to_string(), port)
                     .parse()
                     .expect("expected host as header value to be valid; qed"),
             );
@@ -126,7 +130,7 @@ impl Client {
     }
 }
 
-#[derive(Deserialize, Serialize, Default)]
+#[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Request {
     pub method: String,
     pub headers: HashMap<String, String>,

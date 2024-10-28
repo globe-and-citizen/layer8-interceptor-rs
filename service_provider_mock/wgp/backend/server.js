@@ -1,15 +1,16 @@
 const express = require("express");
 const cors = require("cors");
-
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const app = express();
 const {poems, users} = require("./mock-database.js") 
-const SECRET_KEY = "my_very_secret_key";
 // TODO: For future, use a layer8 npm published package for initialising the client and variables
 const popsicle = require("popsicle");
 const ClientOAuth2 = require("client-oauth2");
+const layer8_middleware_rs = require("layer8-middleware-rs")
 require("dotenv").config();
+
+const SECRET_KEY = "my_very_secret_key";
 const port = process.env.PORT;
 const FRONTEND_URL = process.env.FRONTEND_URL;
 const LAYER8_URL = process.env.LAYER8_URL;
@@ -28,30 +29,35 @@ const layer8Auth = new ClientOAuth2({
   scopes: ["read:user"],
 });
 
-const layer8_middleware = require("layer8_middleware")
 
-const upload = layer8_middleware.multipart({ dest: "pictures/dynamic" });
+const upload = layer8_middleware_rs.ProcessMultipart({ dest: "pictures/dynamic" });
 
 app.get("/healthcheck", (req, res) => {
-  console.log("Enpoint for testing");
+  console.log("Endpoint for testing");
   console.log("req.body: ", req.body);
-  res.send("Bro, ur poems coming soon. Relax a little.");
+  res.send("Poems coming soon...");
 });
 
-//const Layer8 = require("./dist/loadWASM.js");
-//app.use(Layer8);
+app.use(express.json());
 
-app.use(layer8_middleware.tunnel);
+app.get('/', (req, res) => {
+  res.json({ message: "Hello there!" })
+});
+
+app.use(layer8_middleware_rs.tunnel)
 
 app.use(cors());
-app.use('/media', layer8_middleware.static('pictures'));
+app.use('/media', layer8_middleware_rs._static('pictures'));
 app.use('/test', (req, res) => {
   res.status(200).json({ message: 'Test endpoint' });
 });
 
 app.post("/", (req, res) => {
-  console.log("Enpoint for testing");
+  console.log("Endpoint for testing");
   console.log("headers: ", req.headers);
+  console.log("Resp headers: ", res.getHeaderNames())
+  console.log("Give headers: ", res.headers)
+  console.log("Resp body", res.body)
   console.log("req.body: ", req.body);
   res.setHeader("x-header-test", "1234");
   res.send("Server has registered a POST.");
@@ -79,7 +85,9 @@ app.post("/api/register", async (req, res) => {
 });
 
 app.post("/api/login", async (req, res) => {
-  //console.log("users: ", users);
+  console.log("headers: ", res.getHeaderNames())
+  console.log("users: ", users);
+  console.log("data: ", req.body);
   const { email, password } = req.body;
   const user = users.find((u) => u.email === email);
   if (user && (await bcrypt.compare(password, user.password))) {
@@ -160,19 +168,21 @@ app.post("/api/login/layer8/auth", async (req, res) => {
   res.status(200).json({ token });
 });
 
-app.post("/api/profile/upload", upload.single('file'), (req, res) => {
+app.post("/api/profile/upload", (req, res) => {
+  let single_fn = upload.single("file");
+  single_fn(req, res);
+
   const uploadedFile = req.file;
 
   if (!uploadedFile) {
-    return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'No file uploaded' });
   }
-
+  
   res.status(200).json({ 
     message: "File uploaded successfully!",
     url: `${req.protocol}://${req.get('host')}/media/dynamic/${req.file?.name}`
   });
 });
-
 
 app.listen(port, () => {
   console.log(

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aes_gcm::{
     aead::{Aead, Nonce},
     AeadCore, KeyInit,
@@ -235,9 +233,8 @@ impl Jwk {
     }
 }
 
-pub fn jwk_from_map(map: HashMap<String, serde_json::Value>) -> Result<Jwk, String> {
+pub fn jwk_from_map(map: serde_json::Map<String, serde_json::Value>) -> Result<Jwk, String> {
     let server_pub_key = map.get("server_pubKeyECDH").ok_or("server_pubKeyECDH not found")?.clone();
-
     serde_json::from_value::<Jwk>(server_pub_key).map_err(|e| format!("Failed to deserialize server_pubKeyECDH: {}", e))
 }
 
