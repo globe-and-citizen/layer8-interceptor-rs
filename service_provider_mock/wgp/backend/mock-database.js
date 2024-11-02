@@ -22,12 +22,17 @@ module.exports = {
     users: [
         {
             "email": "star",
-            "password": "$2b$10$ssDWc4sXNoafqEdAsvH8TOUXywGsFHsPEODTZlSB4AKe8cqe1PmCi",
+            "password":  "$2a$04$2N3n/C7AS1sRZLQApPkTN.CTTctruI716YzbGMoGAd0etIHzI42UW",
             "profile_image": `${BACKEND_URL}/media/girl.png`,
         },
         {
             "email": "tester",
-            "password": "$2b$10$vPCe/tNw/t2MHK/tGetY1exyvp4AhTC9w6mY5jyHHRAJrClfd1yYW",
+            "password": "$2a$04$2N3n/C7AS1sRZLQApPkTN.CTTctruI716YzbGMoGAd0etIHzI42UW",
+            "profile_image": `${BACKEND_URL}/media/boy.png`,
+        },
+        {
+            "email": "osoro",
+            "password":"$2a$04$WCLv2j8q0IN3.aKBwghme.oq74zwRXIN5E3Mg/NHGZCd.L6G37X9m",
             "profile_image": `${BACKEND_URL}/media/boy.png`,
         }
     ]
