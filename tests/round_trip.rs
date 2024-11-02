@@ -37,9 +37,7 @@ async fn roundtrip_test() {
 
     let up_jwt = resp.headers().get("up_JWT").cloned();
     let data = &resp.bytes().await.unwrap();
-    let server_jwk =
-        jwk_from_map(serde_json::from_slice::<serde_json::Map<String, Value>>(data).unwrap())
-            .unwrap();
+    let server_jwk = jwk_from_map(serde_json::from_slice::<serde_json::Map<String, Value>>(data).unwrap()).unwrap();
 
     let symmetric_key = priv_key_client.get_ecdh_shared_secret(&server_jwk).unwrap();
 
@@ -58,14 +56,7 @@ async fn roundtrip_test() {
         let client = types::new_client(&mock_server.url()).unwrap();
 
         let resp = client
-            .r#do(
-                &req,
-                &symmetric_key,
-                backend_url,
-                false,
-                up_jwt.unwrap().to_str().unwrap(),
-                &uuid,
-            )
+            .r#do(&req, &symmetric_key, backend_url, false, up_jwt.unwrap().to_str().unwrap(), &uuid)
             .await
             .expect("issue calling the endpoint");
 
@@ -226,13 +217,9 @@ mod http_mock_server {
 
             uri if uri.path() == "/init-tunnel" => {
                 let token = generate_token("mock_secret").unwrap();
-                let client_public_jwk =
-                    base64_to_jwk(req.headers().get("x-ecdh-init").unwrap().to_str().unwrap())
-                        .unwrap();
+                let client_public_jwk = base64_to_jwk(req.headers().get("x-ecdh-init").unwrap().to_str().unwrap()).unwrap();
 
-                let shared_secret = server_priv_key
-                    .get_ecdh_shared_secret(&client_public_jwk)
-                    .unwrap();
+                let shared_secret = server_priv_key.get_ecdh_shared_secret(&client_public_jwk).unwrap();
 
                 let mut shared_key = shared_key.lock().unwrap();
                 *shared_key = Some(shared_secret);
@@ -270,20 +257,12 @@ mod http_mock_server {
 
                 // it is expected that the body is encrypted and encoded in base64 format
                 // and set to the "data" key of the request body
-                let data = base64_enc_dec
-                    .decode(req_body.get("data").unwrap())
-                    .unwrap();
+                let data = base64_enc_dec.decode(req_body.get("data").unwrap()).unwrap();
 
-                _ = server_priv_key
-                    .get_ecdh_shared_secret(server_pub_key)
-                    .unwrap();
+                _ = server_priv_key.get_ecdh_shared_secret(server_pub_key).unwrap();
 
                 let shared_key = shared_key.lock().unwrap();
-                let decrypted = shared_key
-                    .clone()
-                    .unwrap()
-                    .symmetric_decrypt(&data)
-                    .unwrap();
+                let decrypted = shared_key.clone().unwrap().symmetric_decrypt(&data).unwrap();
 
                 // Seems confusing that we are deserializing the request again, but bear in mind that the request
                 // was encrypted and encoded in base64 format before being sent to the server, and the one on the function signature
