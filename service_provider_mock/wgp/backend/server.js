@@ -7,7 +7,8 @@ const {poems, users} = require("./mock-database.js")
 // TODO: For future, use a layer8 npm published package for initialising the client and variables
 const popsicle = require("popsicle");
 const ClientOAuth2 = require("client-oauth2");
-const layer8_middleware_rs = require("layer8-middleware-rs")
+const layer8_middleware_rs = require("layer8-middleware-rs");
+const { use } = require("bcrypt/promises.js");
 require("dotenv").config();
 
 const SECRET_KEY = "my_very_secret_key";
@@ -88,7 +89,7 @@ app.post("/api/login", async (req, res) => {
   console.log("headers: ", res.getHeaderNames())
   console.log("users: ", users);
   console.log("data: ", req.body);
-  const { email, password } = req.body;
+  const { email, password } = JSON.parse(req.body);
   const user = users.find((u) => u.email === email);
   if (user && (await bcrypt.compare(password, user.password))) {
     const token = jwt.sign({ email }, SECRET_KEY);

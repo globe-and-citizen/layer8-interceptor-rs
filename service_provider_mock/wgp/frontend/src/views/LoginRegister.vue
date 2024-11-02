@@ -17,7 +17,7 @@ const isRegister = ref(false);
 const isLoggedIn = computed(() => SpToken.value !== null);
 const isContinueAnonymously = ref(false);
 const SpToken = ref(localStorage.getItem("SP_TOKEN") || null);
-const user = ref(localStorage.getItem("_user") ? JSON.parse(localStorage.getItem("_user")) : null);
+const user = ref(localStorage.getItem("_user") || null ) //? JSON.parse(localStorage.getItem("_user")) : null);
 const isLoading = ref(false);
 
 

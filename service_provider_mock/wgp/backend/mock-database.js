@@ -29,6 +29,11 @@ module.exports = {
             "email": "tester",
             "password": "$2a$04$2N3n/C7AS1sRZLQApPkTN.CTTctruI716YzbGMoGAd0etIHzI42UW",
             "profile_image": `${BACKEND_URL}/media/boy.png`,
+        },
+        {
+            "email": "osoro",
+            "password":"$2a$04$WCLv2j8q0IN3.aKBwghme.oq74zwRXIN5E3Mg/NHGZCd.L6G37X9m",
+            "profile_image": `${BACKEND_URL}/media/boy.png`,
         }
     ]
 }

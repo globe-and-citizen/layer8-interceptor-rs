@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use web_sys::FormData;
+use web_sys::{FormData, Response, ResponseInit};
 
 use crate::crypto::{self, generate_key_pair, jwk_from_map};
 use crate::types::{self, new_client};
@@ -86,8 +86,8 @@ pub async fn get_static(url: JsValue) -> Promise {
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        console_log(&format!("Parsed URI: {}", &rebuild_url(&req_url.to_string())));
-        val.get(&rebuild_url(&req_url.to_string())).cloned()
+        console_log(&format!("Parsed URI: {}", &rebuild_url(req_url.as_ref())));
+        val.get(&rebuild_url(req_url.as_ref())).cloned()
     });
 
     console_log(&format!("Client: {:?}", client));
@@ -373,31 +373,25 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     };
 
     if res.status >= 100 && res.status < 300 {
-        let headers = {
-            let headers = web_sys::Headers::new().unwrap();
-            for (key, value) in res.headers.iter() {
-                headers
-                    .append(key, value)
-                    .expect("expected headers to be appended to the web_sys::Headers object; qed");
-            }
+        let response_init = ResponseInit::new();
+        let headers = web_sys::Headers::new().unwrap();
+        for (key, value) in res.headers.iter() {
             headers
+                .append(key, value)
+                .expect("expected headers to be appended to the web_sys::Headers object; qed");
+        }
+
+        response_init.set_headers(&headers);
+        response_init.set_status(res.status);
+        response_init.set_status_text(&res.status_text);
+
+        let mut body = res.body;
+        let response = match Response::new_with_opt_u8_array_and_init(Some(&mut body), &response_init) {
+            Ok(val) => val,
+            Err(e) => {
+                return Promise::reject(&JsError::new(&format!("{:?}", e)).into());
+            }
         };
-
-        let blob = {
-            let json_bytes = serde_json::from_slice::<Value>(&req.body).expect("expected request body to be deserializable into a json value; qed");
-            web_sys::Blob::new_with_u8_array_sequence(
-                &serde_wasm_bindgen::to_value(&json_bytes).expect("expected request body to be serializable; qed"),
-            )
-            .expect("expected blob to be created; qed")
-        };
-
-        let response = web_sys::Response::new_with_opt_blob(Some(&blob)).expect("expected response to be created; qed");
-
-        js_sys::Reflect::set(&response, &JsValue::from("status"), &JsValue::from(res.status))
-            .expect("expected status to be set on the response object; qed");
-        js_sys::Reflect::set(&response, &JsValue::from("statusText"), &JsValue::from(res.status_text))
-            .expect("expected statusText to be set on the response object; qed");
-        js_sys::Reflect::set(&response, &JsValue::from("headers"), &headers).expect("expected headers to be set on the response object; qed");
 
         return Promise::resolve(&response);
     }
@@ -590,7 +584,7 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
 
     if error_destructuring {
         let err = JsError::new("Unable to destructure the layer8 encrypted object.");
-        console_log(&format!("Error: unable to destructure the layer8 encrypted object."));
+        console_log("Error: unable to destructure the layer8 encrypted object.");
         return Promise::reject(&err.into()).into();
     }
 
@@ -680,7 +674,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         proxy_url.port().unwrap_or(443)
     );
 
-    let provider_client = new_client(&url_proxy_).map_err(|e| {
+    let provider_client = new_client(url_proxy_).map_err(|e| {
         ENCRYPTED_TUNNEL_FLAG.set(false);
         e.to_string()
     })?;

@@ -83,7 +83,7 @@ impl Client {
         {
             header_map.insert(
                 "X-Forwarded-Host",
-                format!("{}{}", url.host().expect("expected host to be present; qed").to_string(), port)
+                format!("{}{}", url.host().expect("expected host to be present; qed"), port)
                     .parse()
                     .expect("expected host as header value to be valid; qed"),
             );
@@ -121,6 +121,7 @@ impl Client {
         let body = server_resp.bytes().await.map_err(|e| format!("Failed to read response: {}", e))?;
 
         let response_data = RoundtripEnvelope::from_json_bytes(&body)
+            .map_err(|e| format!("Failed to parse json response: {}", e))?
             .decode()
             .map_err(|e| format!("Failed to decode response: {}", e))?;
 
@@ -169,8 +170,8 @@ impl RoundtripEnvelope {
         serde_json::to_vec(self).expect("RoundtripEnvelope implements Serialize")
     }
 
-    fn from_json_bytes(data: &[u8]) -> Self {
-        serde_json::from_slice(data).expect("Error with RoundtripEnvelope deserialization, check the payload")
+    fn from_json_bytes(data: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(data).map_err(|e| e.to_string())
     }
 }
 
