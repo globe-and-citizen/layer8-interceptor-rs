@@ -99,7 +99,8 @@ pub async fn get_static(url: JsValue) -> Promise {
     });
 
     let host = format!("{}{}", req_url.host().unwrap(), static_path);
-    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url.as_str().replacen(&host, "", 1));
+    console_log(&format!("Url path is: {}", req_url));
+    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url); //req_url.as_str().replacen(&host, "", 1));
 
     let req = types::Request {
         method: "GET".to_string(),
@@ -139,6 +140,7 @@ pub async fn get_static(url: JsValue) -> Promise {
         match res {
             Ok(val) => val,
             Err(e) => {
+                console_log(&format!("Failed to fetch: {}\nWith request {:?}", e, String::from_utf8_lossy(&req.body)));
                 return Promise::reject(&JsError::new(&e).into());
             }
         }
@@ -155,7 +157,11 @@ pub async fn get_static(url: JsValue) -> Promise {
         }
     };
 
+    console_log("Calling serve static before");
+
     let object_url = serve_static(INDEXED_DB_CACHE, &res.body, &file_type, req_url.as_str(), INDEXED_DB_CACHE_TTL);
+
+    console_log("Calling serve static after");
 
     Promise::resolve(&JsValue::from(object_url))
 }
@@ -183,6 +189,8 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
         method: "GET".to_string(),
         ..Default::default()
     };
+
+    // {url, options}
 
     let mut js_body = JsValue::null();
     if !args.is_null() && !args.is_undefined() {
@@ -291,24 +299,17 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
             }
 
             match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
-                Ok(res) => types::Response {
-                    body: res.body,
-                    headers: {
-                        let mut header_map = Vec::new();
-                        for (key, value) in req.headers.iter() {
-                            header_map.push((key.clone(), value.clone()));
-                        }
-                        header_map
-                    },
-                    status: 200,
-                    ..Default::default()
-                },
+                Ok(res) => res,
                 Err(e) => {
+                    console_log(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
+
                     return Promise::reject(&JsError::new(&e).into());
                 }
             }
         }
         "multipart/form-data" => {
+            console_log("Working on the metadata part");
+
             req.headers
                 .insert("Content-Type".to_string(), "application/layer8.buffer+json".to_string());
 
@@ -372,33 +373,27 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
         },
     };
 
-    if res.status >= 100 && res.status < 300 {
-        let response_init = ResponseInit::new();
-        let headers = web_sys::Headers::new().unwrap();
-        for (key, value) in res.headers.iter() {
-            headers
-                .append(key, value)
-                .expect("expected headers to be appended to the web_sys::Headers object; qed");
-        }
-
-        response_init.set_headers(&headers);
-        response_init.set_status(res.status);
-        response_init.set_status_text(&res.status_text);
-
-        let mut body = res.body;
-        let response = match Response::new_with_opt_u8_array_and_init(Some(&mut body), &response_init) {
-            Ok(val) => val,
-            Err(e) => {
-                return Promise::reject(&JsError::new(&format!("{:?}", e)).into());
-            }
-        };
-
-        return Promise::resolve(&response);
+    let response_init = ResponseInit::new();
+    let headers = web_sys::Headers::new().unwrap();
+    for (key, value) in res.headers.iter() {
+        headers
+            .append(key, value)
+            .expect("expected headers to be appended to the web_sys::Headers object; qed");
     }
 
-    console_error(&format!("Fetch failed with status: {}, statusText: {}", res.status, res.status_text));
+    response_init.set_headers(&headers);
+    response_init.set_status(res.status);
+    response_init.set_status_text(&res.status_text);
 
-    Promise::reject(&JsError::new(&res.status_text).into())
+    let mut body = res.body;
+    let response = match Response::new_with_opt_u8_array_and_init(Some(&mut body), &response_init) {
+        Ok(val) => val,
+        Err(e) => {
+            return Promise::reject(&JsError::new(&format!("{:?}", e)).into());
+        }
+    };
+
+    Promise::resolve(&response) 
 }
 
 fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<String, Value>, String> {

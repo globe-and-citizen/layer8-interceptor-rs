@@ -22,6 +22,7 @@ const userName = computed(() => {
 
 // const token = jwt.sign({ isEmailVerified, displayName, countryName }, SECRET_KEY);
 const metaData = computed(() => {
+  // console.log("Layer8 token:", L8Token.value)
   if (L8Token.value && L8Token.value.split(".").length > 1) {
     const payload = JSON.parse(atob(L8Token.value.split(".")[1]));
     return payload;
@@ -54,9 +55,9 @@ const logoutUser = () => {
 onMounted(async()=>{
   let user = localStorage.getItem("_user") ? JSON.parse(localStorage.getItem("_user")) : null
   console.log(user)
-  let url = await static_(user.profile_image);
-  const pictureBox = document.getElementById("pictureBox");
-  pictureBox.src = url;
+  // let url = await static_(user.profile_image);
+  // const pictureBox = document.getElementById("pictureBox");
+  // pictureBox.src = url;
 })
 
 </script>

@@ -121,7 +121,7 @@ impl Client {
         let body = server_resp.bytes().await.map_err(|e| format!("Failed to read response: {}", e))?;
 
         let response_data = RoundtripEnvelope::from_json_bytes(&body)
-            .map_err(|e| format!("Failed to parse json response: {}", e))?
+            .map_err(|e| format!("Failed to parse json response: {}\n Body is: {}", e, String::from_utf8_lossy(&body)))?
             .decode()
             .map_err(|e| format!("Failed to decode response: {}", e))?;
 

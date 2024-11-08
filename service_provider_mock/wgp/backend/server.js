@@ -73,7 +73,7 @@ app.get("/nextpoem", (req, res) => {
 });
 
 app.post("/api/register", async (req, res) => {
-  const { password, email, profile_image } = req.body;
+  const { password, email, profile_image } = JSON.parse(req.body);
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -106,7 +106,7 @@ app.get("/api/login/layer8/auth", async (req, res) => {
 });
 
 app.post("/api/login/layer8/auth", async (req, res) => {
-  const { callback_url } = req.body;
+  const { callback_url } = JSON.parse(req.body);
   const user = await layer8Auth.code
     .getToken(callback_url)
     .then(async (user) => {
