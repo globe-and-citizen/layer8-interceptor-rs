@@ -39,3 +39,4 @@ jobs:
           token: ${{ secrets.NPM_ACCESS_TOKEN }}
           registry: https://registry.npmjs.org
           access: public
+          package: pkg
