@@ -17,13 +17,16 @@ const isRegister = ref(false);
 const isLoggedIn = computed(() => SpToken.value !== null);
 const isContinueAnonymously = ref(false);
 const SpToken = ref(localStorage.getItem("SP_TOKEN") || null);
-const user = ref(localStorage.getItem("_user") || null ) //? JSON.parse(localStorage.getItem("_user")) : null);
+const user =  ref(JSON.parse(localStorage.getItem("_user")) || null); // ref(localStorage.getItem("_user") || null ) //?
 const isLoading = ref(false);
 
 
 // Functions
 const registerUser = async () => {
   try {
+    console.log("username is: ", registerUsername.value)
+    console.log("picture is: ", profileImage.value)
+
     let resp = fetch(BACKEND_URL + "/api/register", {
       method: "POST",
       headers: {
@@ -39,6 +42,10 @@ const registerUser = async () => {
     alert("Registration successful!");
     isRegister.value = false;
   } catch (error) {
+
+    console.log("username is: ", registerUsername.value)
+    console.log("picture is: ", profileImage.value)
+
     console.log(error);
     alert("Registration failed!");
   }

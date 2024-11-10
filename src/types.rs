@@ -1,179 +1,5 @@
-use std::{collections::HashMap, fmt::Debug};
-
-use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
-use url::Url;
 use wasm_bindgen::prelude::*;
-
-use crate::crypto::Jwk;
-
-#[derive(Clone, Debug)]
-pub struct Client(Url);
-
-pub fn new_client(url: &str) -> Result<Client, String> {
-    url::Url::parse(url).map_err(|e| e.to_string()).map(Client)
-}
-
-impl Client {
-    pub async fn r#do(
-        &self,
-        request: &Request,
-        shared_secret: &Jwk,
-        backend_url: &str,
-        is_static: bool,
-        up_jwt: &str,
-        uuid: &str,
-    ) -> Result<Response, String> {
-        self.transfer(request, shared_secret, backend_url, is_static, up_jwt, uuid).await
-    }
-
-    async fn transfer(
-        &self,
-        request: &Request,
-        shared_secret: &Jwk,
-        backend_url: &str,
-        is_static: bool,
-        up_jwt: &str,
-        uuid: &str,
-    ) -> Result<Response, String> {
-        if up_jwt.is_empty() || uuid.is_empty() {
-            return Err("up_jwt and uuid are required".to_string());
-        }
-
-        let response_data = self.do_(request, shared_secret, backend_url, is_static, up_jwt, uuid).await?;
-        serde_json::from_slice::<Response>(&response_data).map_err(|e| e.to_string())
-    }
-
-    async fn do_(
-        &self,
-        request: &Request,
-        shared_secret: &Jwk,
-        backend_url: &str,
-        is_static: bool,
-        up_jwt: &str,
-        uuid: &str,
-    ) -> Result<Vec<u8>, String> {
-        let request_data = RoundtripEnvelope::encode(
-            &shared_secret
-                .symmetric_encrypt(&serde_json::to_vec(request).map_err(|e| format!("Failed to serialize request: {}", e))?)
-                .map_err(|e| format!("Failed to encrypt request: {}", e))?,
-        )
-        .to_json_bytes();
-
-        let url = {
-            if is_static {
-                &self
-                    .0
-                    .join(Url::parse(backend_url).map_err(|e| e.to_string())?.path())
-                    .map_err(|e| e.to_string())?
-            } else {
-                &self.0
-            }
-        };
-
-        // if port is present, let's add it to the url
-        let port = match Url::parse(backend_url).map_err(|e| e.to_string())?.port() {
-            Some(port) => format!(":{}", port),
-            None => "".to_string(),
-        };
-
-        // adding headers
-        let mut header_map = reqwest::header::HeaderMap::new();
-        {
-            header_map.insert(
-                "X-Forwarded-Host",
-                format!("{}{}", url.host().expect("expected host to be present; qed"), port)
-                    .parse()
-                    .expect("expected host as header value to be valid; qed"),
-            );
-
-            header_map.insert(
-                "X-Forwarded-Proto",
-                HeaderValue::from_str(url.scheme()).expect("expected scheme to be valid; qed"),
-            );
-
-            header_map.insert(
-                "Content-Type",
-                HeaderValue::from_str("application/json").expect("expected content type to be valid; qed"),
-            );
-
-            header_map.insert("up-JWT", HeaderValue::from_str(up_jwt).expect("expected up-JWT to be valid; qed"));
-
-            header_map.insert(
-                "x-client-uuid",
-                HeaderValue::from_str(uuid).expect("expected x-client-uuid to be valid; qed"),
-            );
-
-            if is_static {
-                header_map.insert("X-Static", HeaderValue::from_str("true").expect("expected X-Static to be valid; qed"));
-            }
-        }
-
-        let server_resp = reqwest::Client::new()
-            .post(url.as_str())
-            .body(request_data)
-            .headers(header_map)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send request: {}", e))?;
-
-        let body = server_resp.bytes().await.map_err(|e| format!("Failed to read response: {}", e))?;
-
-        let response_data = RoundtripEnvelope::from_json_bytes(&body)
-            .map_err(|e| format!("Failed to parse json response: {}\n Body is: {}", e, String::from_utf8_lossy(&body)))?
-            .decode()
-            .map_err(|e| format!("Failed to decode response: {}", e))?;
-
-        shared_secret
-            .symmetric_decrypt(&response_data)
-            .map_err(|e| format!("Failed to decrypt response: {}", e))
-    }
-}
-
-#[derive(Deserialize, Serialize, Default, Debug)]
-pub struct Request {
-    pub method: String,
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct Response {
-    pub status: u16,
-    pub status_text: String,
-    pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
-}
-
-/// This struct is used to serialize and deserialize the encrypted data, for the purpose of
-/// "round-tripping" the data through the proxy server.
-#[derive(Deserialize, Serialize)]
-struct RoundtripEnvelope {
-    data: String,
-}
-
-impl RoundtripEnvelope {
-    fn encode(data: &[u8]) -> Self {
-        let mut val = String::new();
-        base64_enc_dec.encode_string(data, &mut val);
-        RoundtripEnvelope { data: val }
-    }
-
-    fn decode(&self) -> Result<Vec<u8>, base64::DecodeError> {
-        let mut val = Vec::new();
-        base64_enc_dec.decode_vec(&self.data, &mut val)?;
-        Ok(val)
-    }
-
-    fn to_json_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("RoundtripEnvelope implements Serialize")
-    }
-
-    fn from_json_bytes(data: &[u8]) -> Result<Self, String> {
-        serde_json::from_slice(data).map_err(|e| e.to_string())
-    }
-}
 
 #[derive(Clone)]
 #[wasm_bindgen]
@@ -217,13 +43,13 @@ impl DbCache {
         js_sys::Reflect::set(
             &obj,
             &"url".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes.url).expect("failed to serialize url index"),
+            &serde_wasm_bindgen::to_value(&self.indexes.url).expect_throw("failed to serialize url index"),
         )
         .unwrap();
         js_sys::Reflect::set(
             &obj,
             &"_exp".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes._exp).expect("failed to serialize url index"),
+            &serde_wasm_bindgen::to_value(&self.indexes._exp).expect_throw("failed to serialize url index"),
         )
         .unwrap();
         obj
@@ -240,14 +66,16 @@ impl DbCache {
 pub struct Indexes {
     pub(crate) url: Uniqueness,
     pub(crate) _exp: Uniqueness,
+    pub(crate) body: Uniqueness,
+    pub(crate) _type: Uniqueness,
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
 impl Indexes {
     #[wasm_bindgen(constructor)]
-    pub fn new(url: Uniqueness, _exp: Uniqueness) -> Indexes {
-        Indexes { url, _exp }
+    pub fn new(url: Uniqueness, _exp: Uniqueness, body: Uniqueness, _type: Uniqueness) -> Indexes {
+        Indexes { url, _exp, body, _type }
     }
 
     #[wasm_bindgen(getter)]
@@ -269,6 +97,27 @@ impl Indexes {
     #[wasm_bindgen(setter)]
     pub fn set__exp(&mut self, exp: Uniqueness) {
         self._exp = exp;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn body(&self) -> Uniqueness {
+        self.body.clone()
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_body(&mut self, body: Uniqueness) {
+        self.body = body;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn _type(&self) -> Uniqueness {
+        self._type.clone()
+    }
+
+    #[allow(non_snake_case)] // Need the underscore to match the JS property name.
+    #[wasm_bindgen(setter)]
+    pub fn set__type(&mut self, _type: Uniqueness) {
+        self._type = _type;
     }
 }
 

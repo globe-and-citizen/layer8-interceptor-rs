@@ -55,9 +55,12 @@ const logoutUser = () => {
 onMounted(async()=>{
   let user = localStorage.getItem("_user") ? JSON.parse(localStorage.getItem("_user")) : null
   console.log(user)
-  // let url = await static_(user.profile_image);
-  // const pictureBox = document.getElementById("pictureBox");
-  // pictureBox.src = url;
+  let url = await static_(user.profile_image);
+  const pictureBox = document.getElementById("pictureBox");
+  pictureBox.src = url;
+
+  // also good to get poem on mounted
+  await getPoem();
 })
 
 </script>

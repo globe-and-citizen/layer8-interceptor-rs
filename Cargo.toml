@@ -1,6 +1,6 @@
 [package]
 name = "layer8-interceptor-rs"
-version = "0.0.1"                                                                                                                                                # Keeping the version in sync with the JS version
+version = "0.0.2"                                                                                                                                                # Keeping the version in sync with the JS version
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
@@ -21,21 +21,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 base64 = { version = "0.22.1" }
-secp256k1 = { version = "0.29.1", features = ["rand-std", "hashes-std"] }
-rand = { version = "0.8.5", features = ["small_rng"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2.5.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 reqwest = "0.12.7"
-lazy_static = "1.5.0"
 js-sys = "0.3.70"
 serde-wasm-bindgen = "0.6.5"
-getrandom = { version = "0.2.8", features = [
-    "js", # transient dependency of aes-gcm, we need the js feature 
-] }
-aes-gcm = "0.10.3"
 uuid = { version = "1", features = ["js", "v4", "fast-rng"] }
 web-sys = { version = "0.3.70", features = [
     "FormData",
@@ -43,24 +36,7 @@ web-sys = { version = "0.3.70", features = [
     "Headers",
     "Response",
     "ResponseInit",
+    'ReadableStream',
+    'ReadableStreamDefaultReader',
 ] }
-
-[dev-dependencies]
-layer8-interceptor-rs = { path = "../layer8-interceptor-rs", features = [
-    "no-js",
-] }
-tokio = { version = "1", features = ["full"] }
-jsonwebtoken = "9.3.0"
-hyper = { version = "1", features = ["full"] }
-hyper-util = "0.1.8"
-tower = "0.5.1"
-http-body-util = "0.1.2"
-http = "1.1.0"
-wasm-bindgen-test = "0.3"
-
-[features]
-default = []
-# This feature enables the wasmbindgen types and functions
-js = []
-# This feature exports the crypto and types from the library without the js wasm-bindgen functions, if you're interested in the crypto and types you can enable this feature
-no-js = []
+layer8-primitives = { git = "https://github.com/muse254/layer8-primitives-rs.git", branch = "main" } # TODO: Publish to crates.io

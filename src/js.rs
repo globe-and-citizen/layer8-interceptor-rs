@@ -1,16 +1,19 @@
 use std::{cell::Cell, collections::HashMap};
 
 use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use js_sys::{ArrayBuffer, Object, Promise, Uint8Array};
+use js_sys::{Array, Object, Promise, Uint8Array};
 use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use web_sys::{FormData, Response, ResponseInit};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{File, FormData, Response, ResponseInit};
 
-use crate::crypto::{self, generate_key_pair, jwk_from_map};
-use crate::types::{self, new_client};
+use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
+use layer8_primitives::types::{self, new_client};
+
+use crate::types::{DbCache, Uniqueness};
 
 /// This block imports Javascript functions that are provided by the JS Runtime.
 #[wasm_bindgen]
@@ -34,9 +37,10 @@ extern "C" {
 /// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
 #[wasm_bindgen(module = "/src/js/indexed_db.js")]
 extern "C" {
-    fn open_db(db_name: &str, db_cache: types::DbCache);
-    fn clear_expired_cache(db_name: &str, db_cache: types::DbCache);
-    fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: u32) -> String;
+    fn open_db(db_name: &str, db_cache: DbCache);
+    fn clear_expired_cache(db_name: &str, db_cache: DbCache);
+    #[wasm_bindgen(catch)]
+    fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: u32) -> Result<JsValue, JsValue>;
 }
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
@@ -57,15 +61,17 @@ thread_local! {
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
 
     /// The cache instantiates with the `_layer8cache` IndexedDB.
-    static INDEXED_DBS: HashMap<String, types::DbCache> = HashMap::from([
+    static INDEXED_DBS: HashMap<String, crate::types::DbCache> = HashMap::from([
         (
             INDEXED_DB_CACHE.to_string(),
-            types::DbCache {
+            DbCache {
                 store: "static".to_string(),
                 key_path: "url".to_string(),
-                indexes: types::Indexes{
-                    url: types::Uniqueness { unique: true },
-                    _exp: types::Uniqueness { unique: false },
+                indexes: crate::types::Indexes{
+                    url: Uniqueness { unique: true },
+                    _exp: Uniqueness { unique: false },
+                    body: Uniqueness { unique: false },
+                    _type: Uniqueness { unique: false },
                 }
             },
         )
@@ -75,32 +81,20 @@ thread_local! {
 #[wasm_bindgen(js_name = static_)]
 pub async fn get_static(url: JsValue) -> Promise {
     let req_url = match url.is_string() {
-        true => Url::parse(&url.as_string().unwrap()).unwrap(),
+        true => Url::parse(&url.as_string().unwrap()).expect_throw("expected a valid url string"),
         false => {
             return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
         }
     };
 
-    console_log(&format!("Fetching static file: {}", req_url.as_str()));
-
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        console_log(&format!("Parsed URI: {}", &rebuild_url(req_url.as_ref())));
         val.get(&rebuild_url(req_url.as_ref())).cloned()
     });
 
-    console_log(&format!("Client: {:?}", client));
-
-    let static_path = STATIC_PATH.with(|v| {
-        let val = v.take();
-        v.replace(val.clone());
-        val
-    });
-
-    let host = format!("{}{}", req_url.host().unwrap(), static_path);
     console_log(&format!("Url path is: {}", req_url));
-    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url); //req_url.as_str().replacen(&host, "", 1));
+    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url);
 
     let req = types::Request {
         method: "GET".to_string(),
@@ -136,18 +130,23 @@ pub async fn get_static(url: JsValue) -> Promise {
             val
         });
 
-        let res = client.unwrap().r#do(&req, &symmetric_key, req_url.as_str(), true, &up_jwt, &uuid).await;
+        let res = client.unwrap().r#do(&req, &symmetric_key, req_url.as_str(), false, &up_jwt, &uuid).await;
         match res {
             Ok(val) => val,
             Err(e) => {
-                console_log(&format!("Failed to fetch: {}\nWith request {:?}", e, String::from_utf8_lossy(&req.body)));
+                console_log(&format!(
+                    "Failed to fetch_: {}\nWith request {:?}\nWith headers {:?}",
+                    e,
+                    String::from_utf8_lossy(&req.body),
+                    req.headers
+                ));
                 return Promise::reject(&JsError::new(&e).into());
             }
         }
     };
 
     let file_type = {
-        let file_type = res.headers.iter().find(|(_, v)| v.trim().eq_ignore_ascii_case("Content-Type"));
+        let file_type = res.headers.iter().find(|(k, _)| k.trim().eq_ignore_ascii_case("Content-Type"));
 
         match file_type {
             Some(val) => val.1.clone(),
@@ -157,13 +156,21 @@ pub async fn get_static(url: JsValue) -> Promise {
         }
     };
 
-    console_log("Calling serve static before");
+    let object_url = match serve_static(INDEXED_DB_CACHE, &res.body, &file_type, req_url.as_str(), INDEXED_DB_CACHE_TTL) {
+        Ok(val) => val,
+        Err(e) => {
+            return Promise::reject(
+                &JsError::new(&format!(
+                    "Error occurred interacting with IndexDB: {}",
+                    e.as_string().unwrap_or("error unwrapable".to_string())
+                ))
+                .into(),
+            );
+        }
+    };
 
-    let object_url = serve_static(INDEXED_DB_CACHE, &res.body, &file_type, req_url.as_str(), INDEXED_DB_CACHE_TTL);
-
-    console_log("Calling serve static after");
-
-    Promise::resolve(&JsValue::from(object_url))
+    console_log(&format!("Object URL: {:?}", object_url));
+    Promise::resolve(&object_url)
 }
 
 #[allow(non_snake_case)]
@@ -190,8 +197,6 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
         ..Default::default()
     };
 
-    // {url, options}
-
     let mut js_body = JsValue::null();
     if !args.is_null() && !args.is_undefined() {
         // the options object is expected to be a dictionary
@@ -212,21 +217,22 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                 continue;
             }
 
-            let key = key_value_entry.get(0).as_string().expect("key is a string; qed");
+            let key = key_value_entry.get(0).as_string().expect_throw("key is a string; qed");
 
             match key.to_lowercase().as_str() {
                 "method" => {
                     req.method = key_value_entry.get(1).as_string().unwrap_or("GET".to_string());
                 }
                 "headers" => {
-                    let headers =
-                        object_entries(Object::try_from(&key_value_entry.get(1)).expect("expected headers to be a [key, val] object array; qed"));
+                    let headers = object_entries(
+                        Object::try_from(&key_value_entry.get(1)).expect_throw("expected headers to be a [key, val] object array; qed"),
+                    );
 
                     headers.iter().for_each(|header| {
                         let header_entries = js_sys::Array::from(&header);
                         req.headers.insert(
-                            header_entries.get(0).as_string().expect("key is a string; qed"),
-                            header_entries.get(1).as_string().expect("value is a string; qed"),
+                            header_entries.get(0).as_string().expect_throw("key is a string; qed"),
+                            header_entries.get(1).as_string().expect_throw("value is a string; qed"),
                         );
                     });
                 }
@@ -295,7 +301,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
 
             // the js_body is expected to be a valid json string
             if !js_body.is_null() && !js_body.is_undefined() {
-                req.body = js_body.as_string().expect("expected body to be a string; qed").as_bytes().to_vec();
+                req.body = js_body.as_string().expect_throw("expected body to be a string; qed").as_bytes().to_vec();
             }
 
             match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
@@ -308,8 +314,6 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
             }
         }
         "multipart/form-data" => {
-            console_log("Working on the metadata part");
-
             req.headers
                 .insert("Content-Type".to_string(), "application/layer8.buffer+json".to_string());
 
@@ -317,13 +321,8 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                 return Promise::reject(&JsError::new("No body provided to fetch call.").into());
             }
 
-            let req_url = {
-                let req_url_ = url::Url::parse(&req_url).expect("expected url to be a valid URL; qed");
-                req_url.clone().replacen(&req_url_.host().unwrap().to_string(), "", 1)
-            };
-
             // populating the form data from the body
-            let form_data = match construct_form_data(&js_body, &req_url) {
+            let form_data = match construct_form_data(&js_body, &req_url).await {
                 Ok(val) => val,
                 Err(e) => {
                     return Promise::reject(&JsError::new(&e).into());
@@ -358,7 +357,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
             });
 
             req.body = serde_json::to_vec(&form_data).unwrap();
-            match client.r#do(&req, &symmetric_key, &req_url, false, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
                     return Promise::reject(&JsError::new(&e).into());
@@ -378,7 +377,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     for (key, value) in res.headers.iter() {
         headers
             .append(key, value)
-            .expect("expected headers to be appended to the web_sys::Headers object; qed");
+            .expect_throw("expected headers to be appended to the web_sys::Headers object; qed");
     }
 
     response_init.set_headers(&headers);
@@ -393,13 +392,10 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
         }
     };
 
-    Promise::resolve(&response) 
+    Promise::resolve(&response)
 }
 
-fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<String, Value>, String> {
-    let js_body_object = Object::try_from(js_body).expect("expected body to be an object; qed");
-    let js_body_entries = object_entries(js_body_object);
-
+async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<String, Value>, String> {
     let mut form_data = HashMap::from([(
         "__url_path".to_string(),
         serde_json::to_value(HashMap::from([(
@@ -411,57 +407,55 @@ fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<Stri
         )]))
         .unwrap(),
     )]);
-    for entry in js_body_entries.entries() {
-        // [key, value] item array
-        let entry = {
-            let entry = entry.expect("expected entry to be an array of [key, value] item array; qed");
 
-            if entry.is_null() || entry.is_undefined() {
-                // we skip null or undefined entries if any
-                continue;
+    for entry in FormData::entries(&FormData::from(js_body.clone())) {
+        let entry = entry.map_err(|err| {
+            let msg = format!(
+                "FormData entry error: {}",
+                err.as_string().unwrap_or("issue getting FormData entry".to_string())
+            );
+            console_error(&msg);
+            msg
+        })?;
+
+        if entry.is_null() || entry.is_undefined() {
+            // we skip null or undefined entries if any
+            continue;
+        }
+
+        // [key, value]
+        let key_val_entry = Array::from(&entry);
+        let key = key_val_entry.get(0).as_string().ok_or("Object key was not a string".to_string())?;
+        let value = key_val_entry.get(1);
+
+        let data = {
+            if value.is_instance_of::<File>() {
+                construct_file_data(value).await?
+            } else {
+                match get_constructor_name(&value).as_str() {
+                    "String" => json!({
+                        "_type": "String",
+                        "value": value.as_string().unwrap(),
+                    }),
+                    "Number" => json!({
+                        "_type": "Number",
+                        "value": value.as_f64().unwrap(),
+                    }),
+                    "Boolean" => json!({
+                        "_type": "Boolean",
+                        "value": value.as_bool().unwrap(),
+                    }),
+                    x => return Err(format!("Unsupported value type: {} for key: {}", x, key)),
+                }
             }
-
-            let entry_object = Object::try_from(&entry).expect("expected entry to be an object; qed");
-            object_entries(entry_object)
-        };
-
-        let key = entry.get(0).as_string().expect("expected key to be a string; qed");
-        let value = entry.get(1);
-
-        let reflect_get = js_sys::Reflect::get;
-
-        let data = match get_constructor_name(&value).as_str() {
-            "File" => json!({
-                "_type": "File",
-                "name": reflect_get(&value, &JsValue::from("name")).expect("expected name to be present; qed").as_string().
-                    expect("expected name to be a string; qed"),
-                "size": reflect_get(&value, &JsValue::from("size")).expect("expected size to be present; qed").as_f64().
-                    expect("expected size to be a number; qed"),
-                "type": reflect_get(&value, &JsValue::from("type")).expect("expected type to be present; qed").as_string().
-                    expect("expected type to be a string; qed"),
-                "buff": base64_enc_dec.encode(Uint8Array::new(&ArrayBuffer::from(value)).to_vec())
-            }),
-            "String" => json!({
-                "_type": "String",
-                "value": value.as_string().unwrap(),
-            }),
-            "Number" => json!({
-                "_type": "Number",
-                "value": value.as_f64().unwrap(),
-            }),
-            "Boolean" => json!({
-                "_type": "Boolean",
-                "value": value.as_bool().unwrap(),
-            }),
-            x => return Err(format!("Unsupported value type: {} for key: {}", x, key)),
         };
 
         if let Some(old_value) = form_data.get(&key) {
             // convert the old value to a hashmap
             let old_value =
-                serde_json::from_value::<HashMap<String, Value>>(old_value.clone()).expect("valid json can be converted to a hashmap; qed");
+                serde_json::from_value::<HashMap<String, Value>>(old_value.clone()).expect_throw("valid json can be converted to a hashmap; qed");
             let mut new_value =
-                serde_json::from_value::<HashMap<String, Value>>(data.clone()).expect("valid json can be converted to a hashmap; qed");
+                serde_json::from_value::<HashMap<String, Value>>(data.clone()).expect_throw("valid json can be converted to a hashmap; qed");
 
             // merge the old value with the new value
             new_value.extend(old_value);
@@ -481,7 +475,7 @@ fn get_constructor_name(obj: &JsValue) -> String {
     let prototype = get_prototype_of(obj);
 
     // Get the constructor from the prototype using Reflect.get
-    let constructor = js_sys::Reflect::get(&prototype, &JsValue::from("constructor")).expect("expected constructor to be present; qed");
+    let constructor = js_sys::Reflect::get(&prototype, &JsValue::from("constructor")).expect_throw("expected constructor to be present; qed");
 
     // Check if the constructor is a function
     if constructor.is_function() {
@@ -498,6 +492,98 @@ fn get_constructor_name(obj: &JsValue) -> String {
     }
 
     "undefined".to_string()
+}
+
+async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String> {
+    let reflect_get = js_sys::Reflect::get;
+
+    let name = reflect_get(&value, &JsValue::from("name"))
+        .expect_throw("expected name to be present; qed")
+        .as_string()
+        .expect_throw("expected name to be a string; qed");
+
+    let size = reflect_get(&value, &JsValue::from("size"))
+        .expect_throw("expected size to be present; qed")
+        .as_f64()
+        .expect_throw("expected size to be a number; qed");
+
+    let type_ = reflect_get(&value, &JsValue::from("type"))
+        .expect_throw("expected type to be present; qed")
+        .as_string()
+        .expect_throw("expected type to be a string; qed");
+
+    // trying to read the file to get the buff
+    let reader = {
+        let upload_file = File::from(value);
+        upload_file
+            .stream()
+            .get_reader()
+            .dyn_into::<web_sys::ReadableStreamDefaultReader>()
+            .map_err(|err| {
+                let msg = format!(
+                    "ReadableStreamDefaultReader entry error: {}",
+                    err.as_string().unwrap_or("issue getting ReadableStreamDefaultReader entry".to_string())
+                );
+                console_error(&msg);
+                msg
+            })?
+    };
+
+    let mut buff = Vec::new();
+    loop {
+        let chunk_object = JsFuture::from(reader.read())
+            .await
+            .expect_throw("Read")
+            .dyn_into::<Object>()
+            .map_err(|err| {
+                let msg = format!(
+                    "casting JsValue to Object: {}",
+                    err.as_string().unwrap_or("issue casting Object entry".to_string())
+                );
+                console_error(&msg);
+                msg
+            })?;
+
+        let done = reflect_get(&chunk_object, &JsValue::from_str("done"))
+            .map_err(|err| {
+                let msg = format!(
+                    "casting JsValue to Object: {}",
+                    err.as_string().unwrap_or("issue casting Object entry".to_string())
+                );
+                console_error(&msg);
+                msg
+            })?
+            .as_bool()
+            .expect_throw("this value will always be boolean; qed");
+
+        if done {
+            break;
+        }
+
+        let chunk = reflect_get(&chunk_object, &JsValue::from_str("value"))
+            .map_err(|err| {
+                let msg = format!(
+                    "casting JsValue to Object: {}",
+                    err.as_string().unwrap_or("issue casting Object entry".to_string())
+                );
+                console_error(&msg);
+                msg
+            })?
+            .dyn_into::<Uint8Array>()
+            .expect_throw("we're copying bytes");
+
+        let buff_len = buff.len();
+        buff.resize(buff_len + chunk.length() as usize, 255);
+        chunk.copy_to(&mut buff[buff_len..]);
+    }
+
+    Ok(json!({
+        "_type": "File",
+        "name": name,
+        "size": size,
+        "type": type_,
+        "buff": base64_enc_dec.encode(&buff)
+    }))
 }
 
 /// Test promise resolution/rejection from the console.
@@ -533,11 +619,11 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
     let mut proxy = "http://localhost:5001".to_string();
     let mut mode = "prod".to_string();
     if args.length() > 1 {
-        mode = args.as_string().expect("the mode expected to be a string; qed");
+        mode = args.as_string().expect_throw("the mode expected to be a string; qed");
     }
 
     let cache = INDEXED_DBS.with(|v| {
-        let val = v.get(INDEXED_DB_CACHE).expect("expected indexed db to be present; qed");
+        let val = v.get(INDEXED_DB_CACHE).expect_throw("expected indexed db to be present; qed");
         val.clone()
     });
 
@@ -547,18 +633,18 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
     let entries = object_entries(&this_);
     for entry in entries.iter() {
         let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
-        match val.get(0).as_string().expect("key is a string; qed").as_str() {
+        match val.get(0).as_string().expect_throw("key is a string; qed").as_str() {
             "providers" => {
                 // providers is a list of strings
                 let providers_entries = js_sys::Array::from(&val.get(1));
                 providers_entries.iter().for_each(|provider| {
-                    providers.push(provider.as_string().expect("provider is a string; qed"));
+                    providers.push(provider.as_string().expect_throw("provider is a string; qed"));
                 });
             }
 
             "proxy" => {
                 if mode == "dev" {
-                    proxy = val.get(1).as_string().expect("proxy is a string; qed");
+                    proxy = val.get(1).as_string().expect_throw("proxy is a string; qed");
                 } else if let Ok(val) = std::env::var("LAYER8_PROXY") {
                     proxy = val;
                 }
@@ -566,7 +652,8 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
 
             "staticPath" => {
                 STATIC_PATH.with(|v| {
-                    let path = val.get(1).as_string().expect("staticPath is a string; qed");
+                    let path = val.get(1).as_string().expect_throw("staticPath is a string; qed");
+                    console_log(&format!("Static path: {}", path));
                     v.replace(path);
                 });
             }
@@ -621,8 +708,8 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
             let uuid = Uuid::new_v4().to_string();
             UUID.set(uuid.clone());
 
-            headers.insert("x-ecdh-init", HeaderValue::from_str(&b64_pub_jwk).expect(""));
-            headers.insert("x-client-uuid", HeaderValue::from_str(&uuid).expect(""));
+            headers.insert("x-ecdh-init", HeaderValue::from_str(&b64_pub_jwk).unwrap());
+            headers.insert("x-client-uuid", HeaderValue::from_str(&uuid).unwrap());
             headers
         })
         .send()
@@ -665,7 +752,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     let url_proxy_ = &format!(
         "{}://{}:{}",
         proxy_url.scheme(),
-        proxy_url.host().expect("expected host to be present; qed"),
+        proxy_url.host().expect_throw("expected host to be present; qed"),
         proxy_url.port().unwrap_or(443)
     );
 
@@ -684,8 +771,8 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
 }
 
 fn rebuild_url(url: &str) -> String {
-    let url = url::Url::parse(url).expect("expected provider to be a valid URL; qed");
-    let mut rebuilt_url = url.scheme().to_string() + "://" + url.host_str().expect("expected host to be present; qed");
+    let url = url::Url::parse(url).expect_throw("expected provider to be a valid URL; qed");
+    let mut rebuilt_url = url.scheme().to_string() + "://" + url.host_str().expect_throw("expected host to be present; qed");
     if let Some(port) = url.port() {
         rebuilt_url.push_str(&format!(":{}", port.to_string().as_str()));
     }
