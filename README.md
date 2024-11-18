@@ -30,26 +30,14 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 
 ### Build
 
-1. We first build the application in release mode, making sure to target the wasm32-unknown-unknown target.
+We use wasm-pack to build the wasm module for web.
 
-   ```sh
-   cargo build --release --target wasm32-unknown-unknown
-   ```
+```sh
+wasm-pack build --target bundler --all-features --release   
+```
 
-    > If you run into ` cargo:warning=error: unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'` you will need to use a newer version of llvm.
-    > Please follow the first two steps from the attached documentation to achieve this. [Setup newer llvm/clang.](https://learn.sapio-lang.org/ch01-01-installation.html#local-quickstart)
-
-2. Next we use wasm-bindgen to generate the JavaScript bindings for our Rust code.
-
-   ```sh
-   wasm-bindgen --target web --out-dir out ./target/wasm32-unknown-unknown/release/layer8_interceptor_rs.wasm
-   ```
-
-3. Lastly we can use wasm-opt to optimize the generated wasm file for size.
-
-   ```sh
-   wasm-opt -Oz -o out/layer8_interceptor_rs_bg.wasm out/layer8_interceptor_rs_bg.wasm
-   ```
+> If you run into ` cargo:warning=error: unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'` you will need to use a newer version of llvm.
+> Please follow the first two steps from the attached documentation to achieve this. [Setup newer llvm/clang.](https://learn.sapio-lang.org/ch01-01-installation.html#local-quickstart)
 
 ## Running the interceptor with an example
 
