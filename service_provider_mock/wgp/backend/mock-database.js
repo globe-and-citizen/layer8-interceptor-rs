@@ -22,7 +22,7 @@ module.exports = {
     users: [
         {
             "email": "star",
-            "password":  "$2a$04$2N3n/C7AS1sRZLQApPkTN.CTTctruI716YzbGMoGAd0etIHzI42UW",
+            "password": "$2b$10$ssDWc4sXNoafqEdAsvH8TOUXywGsFHsPEODTZlSB4AKe8cqe1PmCi",
             "profile_image": `${BACKEND_URL}/media/girl.png`,
         },
         {

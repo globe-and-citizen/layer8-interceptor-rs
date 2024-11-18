@@ -6,7 +6,8 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # issues working with ubuntu-latest, added 'env'
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
@@ -15,33 +16,26 @@ jobs:
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.81.0  # Related: <https://github.com/cloudflare/workers-rs/issues/668>, <https://github.com/cloudflare/workers-sdk/issues/7208>
           override: true
           override-file: Cargo.toml
           target: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        run: | 
-            cargo install wasm-pack
-
       - name: Build
         run: |
-          # If macOs install llvm with brew
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install llvm
-            export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-            export CC=/opt/homebrew/opt/llvm/bin/clang
-            export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
-          fi
+          brew install llvm
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          export CC=/opt/homebrew/opt/llvm/bin/clang
+          export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
           cargo install wasm-pack
-          wasm-pack build --target bundler --all-features
-          sudo apt-get -y update && sudo apt-get -y install gawk
-          gawk '{ if (NR == 16) { print $0 " \"snippets/\", \"layer8_interceptor_rs_bg.wasm.d.ts\", "; } else { print $0; } }' ./pkg/package.json > temp.json && mv temp.json ./pkg/package.json 
+          wasm-pack build --target bundler --all-features --release
+          brew install gawk
+          gawk '{ if (NR == 17) { print $0 "\"./snippets/*\", "; } else { print $0; } }' ./pkg/package.json > temp.json && mv temp.json ./pkg/package.json 
 
       - name: Install npm
         uses: actions/setup-node@v2
         with:
-          node-version: '14'
+          node-version: '22'
 
       - name: Publish to NPM 
         uses: JS-DevTools/npm-publish@v3
@@ -49,4 +43,4 @@ jobs:
           token: ${{ secrets.NPM_ACCESS_TOKEN }}
           registry: https://registry.npmjs.org
           access: public
-          package: pkg
+          package: ./pkg

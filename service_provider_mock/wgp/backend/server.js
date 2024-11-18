@@ -176,9 +176,6 @@ app.post('/api/profile/upload', (req, res) => {
   const uploadedFile = req.file
 
   if (!uploadedFile) {
-
-    console.log("Here 1: ", req)
-
     return res.status(400).json({ error: 'No file uploaded' })
   }
 
