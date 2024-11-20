@@ -6,7 +6,7 @@ on:
 
 jobs:
   publish:
-    # issues working with ubuntu-latest, added 'env'
+    # issues working with ubuntu-latest: https://github.com/muse254/layer8-middleware-rs/actions/runs/11941691468/job/33287111463?pr=6
     runs-on: macos-latest
 
     steps:
