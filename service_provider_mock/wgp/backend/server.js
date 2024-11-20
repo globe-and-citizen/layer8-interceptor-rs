@@ -22,8 +22,8 @@ const LAYER8_CALLBACK_URL = `${FRONTEND_URL}/oauth2/callback`
 const LAYER8_RESOURCE_URL = `${LAYER8_URL}/api/user`
 
 const layer8Auth = new ClientOAuth2({
-  clientId: 'notanid',
-  clientSecret: 'absolutelynotasecret!',
+  clientId: '79d166f1-21b9-4fdb-9d48-f0f947c940df',
+  clientSecret: '90a75a536a446401bc872ce546bfd856166ca1147aca71f99dbd983a1c04882b',
   accessTokenUri: `${LAYER8_URL}/api/oauth`,
   authorizationUri: `${LAYER8_URL}/authorize`,
   redirectUri: LAYER8_CALLBACK_URL,
@@ -171,17 +171,20 @@ app.post('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/profile/upload', (req, res) => {
-  upload.single(req, res)
 
-  const uploadedFile = req.file
+  console.log('looking into array: ', upload.array)
 
-  if (!uploadedFile) {
+  upload.array(req, res)
+
+  const uploadedFiles = req.files
+
+  if (!uploadedFiles) {
     return res.status(400).json({ error: 'No file uploaded' })
   }
 
   res.status(200).json({
     message: 'File uploaded successfully!',
-    url: `${req.protocol}://${req.get('host')}/media/dynamic/${req.file?.name}`
+    url: `${req.protocol}://${req.get('host')}/media/dynamic/${uploadedFiles[0]?.name}` // going with the first file for now
   })
 })
 

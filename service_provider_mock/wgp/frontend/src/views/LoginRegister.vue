@@ -138,9 +138,15 @@ const loginWithLayer8Popup = async () => {
 const uploadProfilePicture = async (e) => {
   e.preventDefault();
   isLoading.value = true;
-  const file = e.target.files[0];
+  const files = e.target.files;
+
   const formdata = new FormData();
-  formdata.append("file", file);
+  for (let i = 0; i < files.length; i++) {
+    formdata.append("files", files[i]);
+  }
+
+  console.log("formdata: ", formdata);
+
   fetch(BACKEND_URL + "/api/profile/upload", {
     method: "POST",
     headers: {
@@ -176,7 +182,7 @@ const uploadProfilePicture = async (e) => {
           <input v-model="registerPassword" type="password" placeholder="Password"  class="input input-bordered input-primary w-full max-w-xs"/>
           <hr />
           <h1 class="text-dark pb-4 font-bold">Upload Profile Picture</h1>
-          <input type="file" @change="uploadProfilePicture" />
+          <input type="file" multiple name="files" @change="uploadProfilePicture" />
           <div v-if="profileImage">
             <img id="im" />
           </div>
