@@ -18,21 +18,29 @@ use crate::types::{DbCache, Uniqueness};
 /// This block imports Javascript functions that are provided by the JS Runtime.
 #[wasm_bindgen]
 extern "C" {
+    #[cfg(debug_assertions)]
     #[wasm_bindgen(js_namespace = console, js_name = log)]
     fn console_log(s: &str);
 
+    #[cfg(debug_assertions)]
     #[wasm_bindgen(js_namespace = console, js_name = error)]
     fn console_error(s: &str);
 
     #[wasm_bindgen(js_namespace = Object, js_name = entries)]
     fn object_entries(obj: &Object) -> js_sys::Array;
 
-    #[wasm_bindgen(js_namespace = Object)]
-    fn get_prototype_of(obj: &JsValue) -> JsValue;
+    #[wasm_bindgen(js_namespace = Object, catch)]
+    fn get_prototype_of(obj: &JsValue) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = Function, js_name = toString)]
     fn to_string(func: &JsValue) -> JsValue;
 }
+
+#[cfg(not(debug_assertions))]
+fn console_log(_: &str) {}
+
+#[cfg(not(debug_assertions))]
+fn console_error(_: &str) {}
 
 /// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
 #[wasm_bindgen(module = "/src/js/indexed_db.js")]
@@ -450,21 +458,20 @@ async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMa
             }
         };
 
-        if let Some(old_value) = form_data.get(&key) {
-            // convert the old value to a hashmap
-            let old_value =
-                serde_json::from_value::<HashMap<String, Value>>(old_value.clone()).expect_throw("valid json can be converted to a hashmap; qed");
-            let mut new_value =
-                serde_json::from_value::<HashMap<String, Value>>(data.clone()).expect_throw("valid json can be converted to a hashmap; qed");
-
-            // merge the old value with the new value
-            new_value.extend(old_value);
-            form_data.insert(key, serde_json::to_value(new_value).unwrap());
-            continue;
+        if form_data.contains_key(&key) {
+            if !form_data.get(&key).unwrap().is_array() {
+                let old_value = form_data.get(&key).unwrap();
+                form_data.insert(key, json!([old_value, data]));
+            } else {
+                let old_value = form_data.get_mut(&key).unwrap();
+                old_value
+                    .as_array_mut()
+                    .expect_throw("expected old value to be an array; qed above")
+                    .push(data);
+            }
+        } else {
+            form_data.insert(key, serde_json::to_value(data).unwrap());
         }
-
-        // overwrite the form data key
-        form_data.insert(key, serde_json::to_value(data).unwrap());
     }
 
     Ok(form_data)
@@ -472,7 +479,7 @@ async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMa
 
 fn get_constructor_name(obj: &JsValue) -> String {
     // Get the prototype of the object
-    let prototype = get_prototype_of(obj);
+    let prototype = get_prototype_of(obj).expect_throw("expected prototype to be present since FormData has a finite set of prototypes (?!)");
 
     // Get the constructor from the prototype using Reflect.get
     let constructor = js_sys::Reflect::get(&prototype, &JsValue::from("constructor")).expect_throw("expected constructor to be present; qed");
