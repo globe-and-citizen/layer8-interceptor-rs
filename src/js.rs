@@ -86,10 +86,24 @@ thread_local! {
     ]);
 }
 
-#[wasm_bindgen(js_name = static_)]
+/// This function is called to retrieve the static file.
+/// It is expected to be called with a URL string.
+#[wasm_bindgen(js_name = _static)]
 pub async fn get_static(url: JsValue) -> Promise {
-    let req_url = match url.is_string() {
-        true => Url::parse(&url.as_string().unwrap()).expect_throw("expected a valid url string"),
+    let static_path = STATIC_PATH.with(|v| {
+        let val = v.take();
+        v.replace(val.clone());
+        val
+    });
+
+    let (json_body, mut req_url) = match url.is_string() {
+        true => {
+            // Url::parse(&url.as_string().unwrap()).expect_throw("expected a valid url string"),
+            let url_ = url.as_string().unwrap();
+            let json_body = format!("{{\"__url_path\": \"{}\"}}", url_.replace(&static_path, ""));
+            (json_body, rebuild_url(&url_))
+        }
+
         false => {
             return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
         }
@@ -98,11 +112,12 @@ pub async fn get_static(url: JsValue) -> Promise {
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        val.get(&rebuild_url(req_url.as_ref())).cloned()
+        val.get(&rebuild_url(&req_url)).cloned()
     });
 
-    console_log(&format!("Url path is: {}", req_url));
-    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url);
+    req_url.push_str(&static_path);
+
+    console_log(&format!("Request URL: {}", req_url));
 
     let req = types::Request {
         method: "GET".to_string(),
@@ -138,7 +153,7 @@ pub async fn get_static(url: JsValue) -> Promise {
             val
         });
 
-        let res = client.unwrap().r#do(&req, &symmetric_key, req_url.as_str(), false, &up_jwt, &uuid).await;
+        let res = client.unwrap().r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await;
         match res {
             Ok(val) => val,
             Err(e) => {
@@ -181,12 +196,14 @@ pub async fn get_static(url: JsValue) -> Promise {
     Promise::resolve(&object_url)
 }
 
+/// This function is called to check if the encrypted tunnel is open.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
 pub fn check_encrypted_tunnel() -> Promise {
     Promise::resolve(&JsValue::from(ENCRYPTED_TUNNEL_FLAG.get()))
 }
 
+/// This function is an override of the fetch function. It's arguments are a URL and an options object.
 #[wasm_bindgen]
 pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     if !ENCRYPTED_TUNNEL_FLAG.get() {
@@ -606,6 +623,7 @@ pub fn test_wasm(arg: JsValue) -> Promise {
     Promise::resolve(&JsValue::from(msg))
 }
 
+/// This function is called to check the persistence of the WASM module.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
 pub fn persistence_check() -> Promise {
@@ -618,6 +636,7 @@ pub fn persistence_check() -> Promise {
     Promise::resolve(&JsValue::from(counter))
 }
 
+/// This function is called to initialize the encrypted tunnel.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
 pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -> JsValue {
@@ -733,12 +752,16 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         return Err(String::from("401 response from proxy, user is not authorized."));
     }
 
-    let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&res.bytes().await.map_err(|e| {
+    let res_bytes = res.bytes().await.map_err(|e| {
         console_log(&format!("Failed to read response: {}", e));
         e.to_string()
-    })?)
-    .map_err(|val| {
-        console_log(&format!("Failed to decode response: {}", val));
+    })?;
+    let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(res_bytes.as_ref()).map_err(|val| {
+        console_log(&format!(
+            "Failed to decode response: {}, Data is :{}",
+            val,
+            String::from_utf8_lossy(res_bytes.as_ref())
+        ));
         val.to_string()
     })?;
 

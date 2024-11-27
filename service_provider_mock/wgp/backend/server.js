@@ -171,20 +171,17 @@ app.post('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/profile/upload', (req, res) => {
+  upload.single(req, res)
 
-  console.log('looking into array: ', upload.array)
+  const uploadedFile = req.file
 
-  upload.array(req, res)
-
-  const uploadedFiles = req.files
-
-  if (!uploadedFiles) {
+  if (!uploadedFile) {
     return res.status(400).json({ error: 'No file uploaded' })
   }
 
   res.status(200).json({
     message: 'File uploaded successfully!',
-    url: `${req.protocol}://${req.get('host')}/media/dynamic/${uploadedFiles[0]?.name}` // going with the first file for now
+    url: `${req.protocol}://${req.get('host')}/media/dynamic/${req.file?.name}`
   })
 })
 
