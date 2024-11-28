@@ -49,6 +49,9 @@ We can use the We've Got Poems example from the original Layer8 Interceptor repo
 
 The example can be found in the [wgp](./service_provider_mock/wgp/) directory. Navigate to it and follow the README for a trial run.
 
+> [!NOTE]
+> The wasm module needs to be bootstrapped to the Vue frontend. Please see [vite.config.js](./service_provider_mock/wgp/frontend/vite.config.js) for the configuration.
+
 ## Tests With Code Coverage
 
 To generate code coverage we use `cargo-llvm-cov`. To install it run:
