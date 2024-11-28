@@ -98,9 +98,8 @@ pub async fn get_static(url: JsValue) -> Promise {
 
     let (json_body, mut req_url) = match url.is_string() {
         true => {
-            // Url::parse(&url.as_string().unwrap()).expect_throw("expected a valid url string"),
             let url_ = url.as_string().unwrap();
-            let json_body = format!("{{\"__url_path\": \"{}\"}}", url_.replace(&static_path, ""));
+            let json_body = format!("{{\"__url_path\": \"{}\"}}", url_);
             (json_body, rebuild_url(&url_))
         }
 
@@ -185,7 +184,7 @@ pub async fn get_static(url: JsValue) -> Promise {
             return Promise::reject(
                 &JsError::new(&format!(
                     "Error occurred interacting with IndexDB: {}",
-                    e.as_string().unwrap_or("error unwrapable".to_string())
+                    e.as_string().unwrap_or("error unwrappable".to_string())
                 ))
                 .into(),
             );
