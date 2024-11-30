@@ -10,23 +10,24 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 ### Prerequisites
 
 - [Rust Toolchain](https://www.rust-lang.org/tools/install)
-- [wasm-bindgen](https://crates.io/crates/wasm-bindgen)
+- [wasm-tooling](https://crates.io/crates/wasm-bindgen)
+  - wasm32-unkown-unknown target:
 
-  ```sh
-  cargo install wasm-bindgen-cli
-  ```
+    ```sh
+    rustup target add wasm32-unknown-unknown
+    ```
 
-- [wasm-opt](https://crates.io/crates/wasm-opt)
+  - wasm-bindgen:
 
-  ```sh
-  cargo install wasm-opt
-  ```
+    ```sh
+    cargo install wasm-bindgen-cli
+    ```
 
-- [wasm32-target]
+  - wasm-pack:
 
-  ```sh
-  rustup target add wasm32-unknown-unknown
-  ```
+    ```sh
+    cargo install wasm-pack
+    ```
 
 ### Build
 
@@ -36,16 +37,21 @@ We use wasm-pack to build the wasm module for web.
 wasm-pack build --target bundler --all-features --release   
 ```
 
+> [!NOTE]  
 > If you run into ` cargo:warning=error: unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'` you will need to use a newer version of llvm.
 > Please follow the first two steps from the attached documentation to achieve this. [Setup newer llvm/clang.](https://learn.sapio-lang.org/ch01-01-installation.html#local-quickstart)
 
-(WARNING: LLVM v 19.x.x has breaking changes. So, you'll need to update but not to v19.x.x. Suggested: v18.1.0. To check your version of llvm on Windows, use the command, `$llvm-cov --version` or `$clang --version`)
+> [!WARNING]  
+> (WARNING: LLVM v 19.x.x has breaking changes. So, you'll need to update but not to v19.x.x. Suggested: v18.1.0. To check your version of llvm on Windows, use the command, `$llvm-cov --version` or `$clang --version`)
 
 ## Running the interceptor with an example
 
 We can use the We've Got Poems example from the original Layer8 Interceptor repository to test our wasm implementation. We've changed the module used to this wasm implementation.
 
-The example can be found in the [wgp](./service_provider_mock/wgp/) directory. Navigate to it and follow the readme for a trial run.
+The example can be found in the [wgp](./service_provider_mock/wgp/) directory. Navigate to it and follow the README for a trial run.
+
+> [!NOTE]
+> The wasm module needs to be bootstrapped to the Vue frontend. Please see [vite.config.js](./service_provider_mock/wgp/frontend/vite.config.js) for the configuration.
 
 ## Tests With Code Coverage
 

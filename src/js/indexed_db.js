@@ -91,5 +91,5 @@ export function serve_static(db_name, body, file_type, url, _exp) {
         type: file_type
     });
 
-   return  URL.createObjectURL(blob)
+    return URL.createObjectURL(blob)
 }

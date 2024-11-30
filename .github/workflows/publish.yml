@@ -6,7 +6,7 @@ on:
 
 jobs:
   publish:
-    # issues working with ubuntu-latest, added 'env'
+    # issues working with ubuntu-latest: https://github.com/muse254/layer8-middleware-rs/actions/runs/11941691468/job/33287111463?pr=6
     runs-on: macos-latest
 
     steps:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.81.0  # Related: <https://github.com/cloudflare/workers-rs/issues/668>, <https://github.com/cloudflare/workers-sdk/issues/7208>
+          toolchain: 1.81.0 # Related: <https://github.com/cloudflare/workers-rs/issues/668>, <https://github.com/cloudflare/workers-sdk/issues/7208>
           override: true
           override-file: Cargo.toml
           target: wasm32-unknown-unknown
@@ -29,15 +29,17 @@ jobs:
           export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
           cargo install wasm-pack
           wasm-pack build --target bundler --all-features --release
+          # Post build glue for the wasm-pack build
           brew install gawk
-          gawk '{ if (NR == 17) { print $0 "\"./snippets/*\", "; } else { print $0; } }' ./pkg/package.json > temp.json && mv temp.json ./pkg/package.json 
+          gawk -f post_build.gawk ./pkg/package.json > ./pkg/package.json.tmp && mv ./pkg/package.json.tmp ./pkg/package.json
+          gawk -f post_build.gawk ./pkg/layer8_interceptor_rs.js > ./pkg/layer8_interceptor_rs.js.tmp && mv ./pkg/layer8_interceptor_rs.js.tmp ./pkg/layer8_interceptor_rs.js
 
       - name: Install npm
         uses: actions/setup-node@v2
         with:
-          node-version: '22'
+          node-version: "22"
 
-      - name: Publish to NPM 
+      - name: Publish to NPM
         uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_ACCESS_TOKEN }}

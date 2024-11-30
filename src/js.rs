@@ -33,14 +33,36 @@ extern "C" {
     fn get_prototype_of(obj: &JsValue) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = Function, js_name = toString)]
-    fn to_string(func: &JsValue) -> JsValue;
+    fn to_string(func: &JsValue) -> String;
 }
 
 #[cfg(not(debug_assertions))]
-fn console_log(_: &str) {}
+macro_rules! console_log {
+    ($msg:expr) => {
+        ()
+    };
+}
+
+#[cfg(debug_assertions)]
+macro_rules! console_log {
+    ($msg:expr) => {
+        console_log($msg)
+    };
+}
 
 #[cfg(not(debug_assertions))]
-fn console_error(_: &str) {}
+macro_rules! console_error {
+    ($msg:expr) => {
+        ()
+    };
+}
+
+#[cfg(debug_assertions)]
+macro_rules! console_error {
+    ($msg:expr) => {
+        console_error($msg)
+    };
+}
 
 /// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
 #[wasm_bindgen(module = "/src/js/indexed_db.js")]
@@ -48,13 +70,13 @@ extern "C" {
     fn open_db(db_name: &str, db_cache: DbCache);
     fn clear_expired_cache(db_name: &str, db_cache: DbCache);
     #[wasm_bindgen(catch)]
-    fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: u32) -> Result<JsValue, JsValue>;
+    fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: i32) -> Result<String, JsValue>;
 }
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
-const INDEXED_DB_CACHE_TTL: u32 = 60 * 60 * 24 * 2; // 2 days in seconds
+const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2; // 2 days in seconds
 
 thread_local! {
     static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
@@ -86,23 +108,34 @@ thread_local! {
     ]);
 }
 
-#[wasm_bindgen(js_name = static_)]
-pub async fn get_static(url: JsValue) -> Promise {
-    let req_url = match url.is_string() {
-        true => Url::parse(&url.as_string().unwrap()).expect_throw("expected a valid url string"),
-        false => {
-            return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
-        }
-    };
+/// This function is called to retrieve the static file.
+/// It is expected to be called with a URL string.
+///
+/// The alias for this function is `static`, for backwards compatibility purposes.
+#[wasm_bindgen(js_name = _static)]
+pub async fn get_static(url: String) -> Result<String, JsError> {
+    if url.is_empty() {
+        return Err(JsError::new("Invalid url provided to fetch call"));
+    }
+
+    let static_path = STATIC_PATH.with(|v| {
+        let val = v.take();
+        v.replace(val.clone());
+        val
+    });
+
+    let json_body = format!("{{\"__url_path\": \"{}\"}}", url);
+    let mut req_url = rebuild_url(&url);
 
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
-        val.get(&rebuild_url(req_url.as_ref())).cloned()
+        val.get(&req_url).cloned()
     });
 
-    console_log(&format!("Url path is: {}", req_url));
-    let json_body = format!("{{\"__url_path\": \"{}\"}}", req_url);
+    req_url.push_str(&static_path);
+
+    console_log!(&format!("Request URL: {}", req_url));
 
     let req = types::Request {
         method: "GET".to_string(),
@@ -120,7 +153,7 @@ pub async fn get_static(url: JsValue) -> Promise {
         match symmetric_key {
             Some(key) => key,
             None => {
-                return Promise::reject(&JsError::new("symmetric key not found.").into());
+                return Err(JsError::new("symmetric key not found."));
             }
         }
     };
@@ -138,17 +171,20 @@ pub async fn get_static(url: JsValue) -> Promise {
             val
         });
 
-        let res = client.unwrap().r#do(&req, &symmetric_key, req_url.as_str(), false, &up_jwt, &uuid).await;
+        let res = client
+            .expect_throw("client could not be found. This is likely due to the encrypted tunnel not being established correctly.")
+            .r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid)
+            .await;
         match res {
             Ok(val) => val,
             Err(e) => {
-                console_log(&format!(
+                console_log!(&format!(
                     "Failed to fetch_: {}\nWith request {:?}\nWith headers {:?}",
                     e,
                     String::from_utf8_lossy(&req.body),
                     req.headers
                 ));
-                return Promise::reject(&JsError::new(&e).into());
+                return Err(JsError::new(&e));
             }
         }
     };
@@ -159,7 +195,7 @@ pub async fn get_static(url: JsValue) -> Promise {
         match file_type {
             Some(val) => val.1.clone(),
             None => {
-                return Promise::reject(&JsError::new("Content-Type header not found.").into());
+                return Err(JsError::new("Content-Type header not found."));
             }
         }
     };
@@ -167,38 +203,31 @@ pub async fn get_static(url: JsValue) -> Promise {
     let object_url = match serve_static(INDEXED_DB_CACHE, &res.body, &file_type, req_url.as_str(), INDEXED_DB_CACHE_TTL) {
         Ok(val) => val,
         Err(e) => {
-            return Promise::reject(
-                &JsError::new(&format!(
-                    "Error occurred interacting with IndexDB: {}",
-                    e.as_string().unwrap_or("error unwrapable".to_string())
-                ))
-                .into(),
-            );
+            return Err(JsError::new(&format!(
+                "Error occurred interacting with IndexDB: {}",
+                e.as_string().unwrap_or("error unwrappable".to_string())
+            )));
         }
     };
 
-    console_log(&format!("Object URL: {:?}", object_url));
-    Promise::resolve(&object_url)
+    console_log!(&format!("Object URL: {:?}", object_url));
+    Ok(object_url)
 }
 
+/// This function is called to check if the encrypted tunnel is open.
+/// Returning a boolean value.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
-pub fn check_encrypted_tunnel() -> Promise {
-    Promise::resolve(&JsValue::from(ENCRYPTED_TUNNEL_FLAG.get()))
+pub async fn check_encrypted_tunnel() -> bool {
+    ENCRYPTED_TUNNEL_FLAG.get()
 }
 
+/// This function is an override of the fetch function. It's arguments are a URL and an options object.
 #[wasm_bindgen]
-pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
+pub async fn fetch(url: String, options: Object) -> Result<Response, JsError> {
     if !ENCRYPTED_TUNNEL_FLAG.get() {
-        return Promise::reject(&JsError::new("Encrypted tunnel is closed. Reload page.").into());
+        return Err(JsError::new("Encrypted tunnel is closed. Reload page."));
     }
-
-    let req_url = match url.is_string() {
-        true => url.as_string().unwrap(),
-        false => {
-            return Promise::reject(&JsError::new("Invalid url provided to fetch call").into());
-        }
-    };
 
     let mut req = types::Request {
         method: "GET".to_string(),
@@ -206,35 +235,27 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     };
 
     let mut js_body = JsValue::null();
-    if !args.is_null() && !args.is_undefined() {
-        // the options object is expected to be a dictionary
-        let options = match Object::try_from(&args) {
-            Some(options) => options,
-            None => {
-                return Promise::reject(&JsError::new("Invalid options object provided.").into());
-            }
-        };
-
+    if !options.is_null() && !options.is_undefined() {
         // [[key, value], ...] result from Object.entries
-        let entries = object_entries(options);
+        let entries = object_entries(&options);
 
         for entry in entries.iter() {
             // [key, value] item array
             let key_value_entry = js_sys::Array::from(&entry);
-            if key_value_entry.get(0).is_null() || key_value_entry.get(0).is_undefined() || !key_value_entry.get(0).is_string() {
+            let key = key_value_entry.get(0);
+            let value = key_value_entry.get(1);
+            if key.is_null() || key.is_undefined() || !key.is_string() {
                 continue;
             }
 
-            let key = key_value_entry.get(0).as_string().expect_throw("key is a string; qed");
+            let key = key.as_string().expect_throw("key is a string; qed");
 
             match key.to_lowercase().as_str() {
                 "method" => {
-                    req.method = key_value_entry.get(1).as_string().unwrap_or("GET".to_string());
+                    req.method = value.as_string().unwrap_or("GET".to_string());
                 }
                 "headers" => {
-                    let headers = object_entries(
-                        Object::try_from(&key_value_entry.get(1)).expect_throw("expected headers to be a [key, val] object array; qed"),
-                    );
+                    let headers = object_entries(Object::try_from(&value).expect_throw("expected headers to be a [key, val] object array; qed"));
 
                     headers.iter().for_each(|header| {
                         let header_entries = js_sys::Array::from(&header);
@@ -245,7 +266,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                     });
                 }
                 "body" => {
-                    js_body = key_value_entry.get(1);
+                    js_body = value;
                     if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
                         req.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
                     }
@@ -260,16 +281,18 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
         }
     }
 
-    let l8_client_res = L8_CLIENTS.with(|v| {
-        let val = v.take();
-        v.replace(val.clone());
-        val.get(&rebuild_url(&req_url)).cloned()
-    });
+    let client = {
+        let l8_clients = L8_CLIENTS.with(|v| {
+            let val = v.take();
+            v.replace(val.clone());
+            val
+        });
 
-    let client = match l8_client_res {
-        Some(client) => client,
-        None => {
-            return Promise::reject(&JsError::new("client could not be found").into());
+        match l8_clients.get(&rebuild_url(&url)).cloned() {
+            Some(client) => client,
+            None => {
+                return Err(JsError::new("client could not be found"));
+            }
         }
     };
 
@@ -291,7 +314,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
             let symmetric_key = match symmetric_key {
                 Some(key) => key,
                 None => {
-                    return Promise::reject(&JsError::new("symmetric key not found.").into());
+                    return Err(JsError::new("symmetric key not found."));
                 }
             };
 
@@ -312,12 +335,12 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                 req.body = js_body.as_string().expect_throw("expected body to be a string; qed").as_bytes().to_vec();
             }
 
-            match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
-                    console_log(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
+                    console_log!(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
 
-                    return Promise::reject(&JsError::new(&e).into());
+                    return Err(JsError::new(&e));
                 }
             }
         }
@@ -326,14 +349,14 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                 .insert("Content-Type".to_string(), "application/layer8.buffer+json".to_string());
 
             if js_body.is_null() || js_body.is_undefined() {
-                return Promise::reject(&JsError::new("No body provided to fetch call.").into());
+                return Err(JsError::new("No body provided to fetch call."));
             }
 
             // populating the form data from the body
-            let form_data = match construct_form_data(&js_body, &req_url).await {
+            let form_data = match construct_form_data(&js_body, &url).await {
                 Ok(val) => val,
                 Err(e) => {
-                    return Promise::reject(&JsError::new(&e).into());
+                    return Err(JsError::new(&e));
                 }
             };
 
@@ -347,7 +370,7 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
                 match symmetric_key {
                     Some(key) => key,
                     None => {
-                        return Promise::reject(&JsError::new("symmetric key not found.").into());
+                        return Err(JsError::new("symmetric key not found."));
                     }
                 }
             };
@@ -365,10 +388,10 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
             });
 
             req.body = serde_json::to_vec(&form_data).unwrap();
-            match client.r#do(&req, &symmetric_key, &req_url, true, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
-                    return Promise::reject(&JsError::new(&e).into());
+                    return Err(JsError::new(&e));
                 }
             }
         }
@@ -396,11 +419,11 @@ pub async fn fetch(url: JsValue, args: JsValue) -> Promise {
     let response = match Response::new_with_opt_u8_array_and_init(Some(&mut body), &response_init) {
         Ok(val) => val,
         Err(e) => {
-            return Promise::reject(&JsError::new(&format!("{:?}", e)).into());
+            return Err(JsError::new(&format!("{:?}", e)));
         }
     };
 
-    Promise::resolve(&response)
+    Ok(response)
 }
 
 async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<String, Value>, String> {
@@ -422,7 +445,7 @@ async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMa
                 "FormData entry error: {}",
                 err.as_string().unwrap_or("issue getting FormData entry".to_string())
             );
-            console_error(&msg);
+            console_error!(&msg);
             msg
         })?;
 
@@ -487,8 +510,7 @@ fn get_constructor_name(obj: &JsValue) -> String {
     // Check if the constructor is a function
     if constructor.is_function() {
         // Convert the function to string and extract the name
-        let constructor_str = to_string(&constructor);
-        let constructor_name = constructor_str.as_string().unwrap_or_default();
+        let constructor_name = to_string(&constructor);
 
         // Extract the name from the function string
         if let Some(name_start) = constructor_name.find("function ") {
@@ -505,82 +527,50 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
     let reflect_get = js_sys::Reflect::get;
 
     let name = reflect_get(&value, &JsValue::from("name"))
-        .expect_throw("expected name to be present; qed")
+        .map_err(|_| "expected name to be present".to_string())?
         .as_string()
-        .expect_throw("expected name to be a string; qed");
+        .ok_or("expected name to be a string".to_string())?;
 
     let size = reflect_get(&value, &JsValue::from("size"))
-        .expect_throw("expected size to be present; qed")
+        .map_err(|_| "expected size to be present".to_string())?
         .as_f64()
-        .expect_throw("expected size to be a number; qed");
+        .ok_or("expected size to be a number".to_string())?;
 
     let type_ = reflect_get(&value, &JsValue::from("type"))
-        .expect_throw("expected type to be present; qed")
+        .map_err(|_| "expected type to be present".to_string())?
         .as_string()
-        .expect_throw("expected type to be a string; qed");
+        .ok_or("expected type to be a string".to_string())?;
 
-    // trying to read the file to get the buff
-    let reader = {
-        let upload_file = File::from(value);
-        upload_file
-            .stream()
-            .get_reader()
-            .dyn_into::<web_sys::ReadableStreamDefaultReader>()
-            .map_err(|err| {
-                let msg = format!(
-                    "ReadableStreamDefaultReader entry error: {}",
-                    err.as_string().unwrap_or("issue getting ReadableStreamDefaultReader entry".to_string())
-                );
-                console_error(&msg);
-                msg
-            })?
-    };
+    let reader = File::from(value)
+        .stream()
+        .get_reader()
+        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
+        .map_err(|_| "issue getting ReadableStreamDefaultReader entry".to_string())?;
 
     let mut buff = Vec::new();
     loop {
         let chunk_object = JsFuture::from(reader.read())
             .await
-            .expect_throw("Read")
+            .map_err(|_| "Read".to_string())?
             .dyn_into::<Object>()
-            .map_err(|err| {
-                let msg = format!(
-                    "casting JsValue to Object: {}",
-                    err.as_string().unwrap_or("issue casting Object entry".to_string())
-                );
-                console_error(&msg);
-                msg
-            })?;
+            .map_err(|_| "issue casting Object entry".to_string())?;
 
         let done = reflect_get(&chunk_object, &JsValue::from_str("done"))
-            .map_err(|err| {
-                let msg = format!(
-                    "casting JsValue to Object: {}",
-                    err.as_string().unwrap_or("issue casting Object entry".to_string())
-                );
-                console_error(&msg);
-                msg
-            })?
+            .map_err(|_| "issue casting Object entry".to_string())?
             .as_bool()
-            .expect_throw("this value will always be boolean; qed");
+            .ok_or("this value will always be boolean".to_string())?;
 
         if done {
             break;
         }
 
         let chunk = reflect_get(&chunk_object, &JsValue::from_str("value"))
-            .map_err(|err| {
-                let msg = format!(
-                    "casting JsValue to Object: {}",
-                    err.as_string().unwrap_or("issue casting Object entry".to_string())
-                );
-                console_error(&msg);
-                msg
-            })?
+            .map_err(|_| "issue casting Object entry".to_string())?
             .dyn_into::<Uint8Array>()
-            .expect_throw("we're copying bytes");
+            .map_err(|_| "we're copying bytes".to_string())?;
 
         let buff_len = buff.len();
-        buff.resize(buff_len + chunk.length() as usize, 255);
+        buff.resize(buff_len + chunk.length() as usize, 0);
         chunk.copy_to(&mut buff[buff_len..]);
     }
 
@@ -594,6 +584,7 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
 }
 
 /// Test promise resolution/rejection from the console.
+/// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = testWASM)]
 pub fn test_wasm(arg: JsValue) -> Promise {
@@ -606,6 +597,8 @@ pub fn test_wasm(arg: JsValue) -> Promise {
     Promise::resolve(&JsValue::from(msg))
 }
 
+/// This function is called to check the persistence of the WASM module.
+/// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
 pub fn persistence_check() -> Promise {
@@ -614,20 +607,16 @@ pub fn persistence_check() -> Promise {
         v.get()
     });
 
-    console_log(&format!("WASM Counter: {}", counter));
+    console_log!(&format!("WASM Counter: {}", counter));
     Promise::resolve(&JsValue::from(counter))
 }
 
+/// This function is called to initialize the encrypted tunnel.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -> JsValue {
+pub async fn init_encrypted_tunnel(this_: js_sys::Object, _args: js_sys::Array) -> JsValue {
     let mut providers = Vec::new();
-    // let mut proxy = "https://layer8devproxy.net".to_string(); // set LAYER8_PROXY in the environment to override
-    let mut proxy = "http://localhost:5001".to_string();
-    let mut mode = "prod".to_string();
-    if args.length() > 1 {
-        mode = args.as_string().expect_throw("the mode expected to be a string; qed");
-    }
+    let mut proxy = String::new();
 
     let cache = INDEXED_DBS.with(|v| {
         let val = v.get(INDEXED_DB_CACHE).expect_throw("expected indexed db to be present; qed");
@@ -650,17 +639,13 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
             }
 
             "proxy" => {
-                if mode == "dev" {
-                    proxy = val.get(1).as_string().expect_throw("proxy is a string; qed");
-                } else if let Ok(val) = std::env::var("LAYER8_PROXY") {
-                    proxy = val;
-                }
+                proxy = val.get(1).as_string().expect_throw("proxy is a string; qed");
             }
 
             "staticPath" => {
                 STATIC_PATH.with(|v| {
                     let path = val.get(1).as_string().expect_throw("staticPath is a string; qed");
-                    console_log(&format!("Static path: {}", path));
+                    console_log!(&format!("Static path: {}", path));
                     v.replace(path);
                 });
             }
@@ -673,25 +658,25 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, args: js_sys::Array) -
 
     if error_destructuring {
         let err = JsError::new("Unable to destructure the layer8 encrypted object.");
-        console_log("Error: unable to destructure the layer8 encrypted object.");
+        console_log!("Error: unable to destructure the layer8 encrypted object.");
         return Promise::reject(&err.into()).into();
     }
 
     for provider in providers.clone() {
-        console_log(&format!("Establishing encrypted tunnel with provider: {}", provider));
+        console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
         if let Err(err) = init_tunnel(&provider, &proxy).await {
-            console_error(&format!(
+            console_error!(&format!(
                 "Failed to establish encrypted tunnel with provider: {}. Error: {}",
                 provider, err
             ));
             let err = JsError::new(&err);
             return Promise::reject(&err.into()).into();
         } else {
-            console_log(&format!("Encrypted tunnel established with provider: {}", provider));
+            console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
         }
     }
 
-    console_log(&format!("Encrypted tunnel established with providers: {:?}", providers));
+    console_log!(&format!("Encrypted tunnel established with providers: {:?}", providers));
     Promise::resolve(&JsValue::null()).into()
 }
 
@@ -722,7 +707,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         .send()
         .await
         .map_err(|e| {
-            console_log(&format!("Failed to send request: {}", e));
+            console_log!(&format!("Failed to send request: {}", e));
             e.to_string()
         })?;
 
@@ -733,12 +718,16 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         return Err(String::from("401 response from proxy, user is not authorized."));
     }
 
-    let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&res.bytes().await.map_err(|e| {
-        console_log(&format!("Failed to read response: {}", e));
+    let res_bytes = res.bytes().await.map_err(|e| {
+        console_log!(&format!("Failed to read response: {}", e));
         e.to_string()
-    })?)
-    .map_err(|val| {
-        console_log(&format!("Failed to decode response: {}", val));
+    })?;
+    let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(res_bytes.as_ref()).map_err(|val| {
+        console_log!(&format!(
+            "Failed to decode response: {}, Data is :{}",
+            val,
+            String::from_utf8_lossy(res_bytes.as_ref())
+        ));
         val.to_string()
     })?;
 
@@ -747,7 +736,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
             .remove("up-JWT")
             .ok_or("up_jwt not found")?
             .as_str()
-            .ok_or("expected up_jwt to be a string")?
+            .unwrap() // infalliable
             .to_string(),
     );
 
@@ -774,15 +763,14 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         v.replace(map);
     });
 
-    Ok(console_log(&format!("Encrypted tunnel established with provider: {}", provider)))
+    Ok(console_log!(&format!("Encrypted tunnel established with provider: {}", provider)))
 }
 
 fn rebuild_url(url: &str) -> String {
     let url = url::Url::parse(url).expect_throw("expected provider to be a valid URL; qed");
-    let mut rebuilt_url = url.scheme().to_string() + "://" + url.host_str().expect_throw("expected host to be present; qed");
-    if let Some(port) = url.port() {
-        rebuilt_url.push_str(&format!(":{}", port.to_string().as_str()));
+    let rebuilt_url = format!("{}://{}", url.scheme(), url.host_str().expect_throw("expected host to be present; qed"));
+    match url.port() {
+        Some(port) => format!("{}:{}", rebuilt_url, port),
+        None => rebuilt_url,
     }
-
-    rebuilt_url
 }
