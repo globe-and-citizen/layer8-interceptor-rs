@@ -3,7 +3,7 @@
 import { computed, ref } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import { fetch,  static_} from 'layer8-interceptor-rs'
+import { fetch, static_} from 'layer8-interceptor-rs'
 
 // Variables
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
@@ -138,15 +138,9 @@ const loginWithLayer8Popup = async () => {
 const uploadProfilePicture = async (e) => {
   e.preventDefault();
   isLoading.value = true;
-  const files = e.target.files;
-
+  const file = e.target.files[0];
   const formdata = new FormData();
-  for (let i = 0; i < files.length; i++) {
-    formdata.append("files", files[i]);
-  }
-
-  console.log("formdata: ", formdata);
-
+  formdata.append("file", file);
   fetch(BACKEND_URL + "/api/profile/upload", {
     method: "POST",
     headers: {
@@ -182,7 +176,7 @@ const uploadProfilePicture = async (e) => {
           <input v-model="registerPassword" type="password" placeholder="Password"  class="input input-bordered input-primary w-full max-w-xs"/>
           <hr />
           <h1 class="text-dark pb-4 font-bold">Upload Profile Picture</h1>
-          <input type="file" multiple name="files" @change="uploadProfilePicture" />
+          <input type="file" @change="uploadProfilePicture" />
           <div v-if="profileImage">
             <img id="im" />
           </div>

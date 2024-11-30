@@ -22,8 +22,8 @@ const LAYER8_CALLBACK_URL = `${FRONTEND_URL}/oauth2/callback`
 const LAYER8_RESOURCE_URL = `${LAYER8_URL}/api/user`
 
 const layer8Auth = new ClientOAuth2({
-  clientId: '79d166f1-21b9-4fdb-9d48-f0f947c940df',
-  clientSecret: '90a75a536a446401bc872ce546bfd856166ca1147aca71f99dbd983a1c04882b',
+  clientId: 'notanid',
+  clientSecret: 'absolutelynotasecret!',
   accessTokenUri: `${LAYER8_URL}/api/oauth`,
   authorizationUri: `${LAYER8_URL}/authorize`,
   redirectUri: LAYER8_CALLBACK_URL,
