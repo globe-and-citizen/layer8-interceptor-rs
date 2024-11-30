@@ -10,23 +10,24 @@ The offering for this is a smaller wasm binary size and potentially better perfo
 ### Prerequisites
 
 - [Rust Toolchain](https://www.rust-lang.org/tools/install)
-- [wasm-bindgen](https://crates.io/crates/wasm-bindgen)
+- [wasm-tooling](https://crates.io/crates/wasm-bindgen)
+  - wasm32-unkown-unknown target:
 
-  ```sh
-  cargo install wasm-bindgen-cli
-  ```
+    ```sh
+    rustup target add wasm32-unknown-unknown
+    ```
 
-- [wasm-opt](https://crates.io/crates/wasm-opt)
+  - wasm-bindgen:
 
-  ```sh
-  cargo install wasm-opt
-  ```
+    ```sh
+    cargo install wasm-bindgen-cli
+    ```
 
-- [wasm32-target]
+  - wasm-pack:
 
-  ```sh
-  rustup target add wasm32-unknown-unknown
-  ```
+    ```sh
+    cargo install wasm-pack
+    ```
 
 ### Build
 
