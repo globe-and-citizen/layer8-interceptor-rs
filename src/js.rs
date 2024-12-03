@@ -13,7 +13,7 @@ use web_sys::{File, FormData, Response, ResponseInit};
 use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
 use layer8_primitives::types::{self, new_client};
 
-use crate::types::{DbCache, Uniqueness};
+use crate::types::{DbCache, InitConfig, Uniqueness};
 
 /// This block imports Javascript functions that are provided by the JS Runtime.
 #[wasm_bindgen]
@@ -87,7 +87,7 @@ thread_local! {
     static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
     static UP_JWT: Cell<String> = Cell::new("".to_string());
     static UUID: Cell<String> = Cell::new("".to_string());
-    static STATIC_PATH: Cell<String> = Cell::new("".to_string());
+    static STATIC_PATHS: Cell<Vec<String>> = Cell::new(vec![]);
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
 
     /// The cache instantiates with the `_layer8cache` IndexedDB.
@@ -118,7 +118,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         return Err(JsError::new("Invalid url provided to fetch call"));
     }
 
-    let static_path = STATIC_PATH.with(|v| {
+    let static_paths = STATIC_PATHS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
         val
@@ -133,7 +133,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         val.get(&req_url).cloned()
     });
 
-    req_url.push_str(&static_path);
+    // req_url.push_str(&static_paths);
 
     console_log!(&format!("Request URL: {}", req_url));
 
@@ -587,36 +587,54 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
 /// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = testWASM)]
-pub fn test_wasm(arg: JsValue) -> Promise {
+pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
     if arg.is_null() || arg.is_undefined() {
-        let err = JsError::new("The argument is null or undefined.");
-        return Promise::reject(&err.into());
+        return Err(JsError::new("The argument is null or undefined."));
     }
 
-    let msg = format!("WASM Interceptor version {INTERCEPTOR_VERSION} successfully loaded. Argument passed: {:?}. To test promise rejection, call with no argument.", arg);
-    Promise::resolve(&JsValue::from(msg))
+    Ok(format!("WASM Interceptor version {INTERCEPTOR_VERSION} successfully loaded. Argument passed: {:?}. To test promise rejection, call with no argument.", arg))
 }
 
 /// This function is called to check the persistence of the WASM module.
 /// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
-pub fn persistence_check() -> Promise {
+pub async fn persistence_check() -> u32 {
     let counter = COUNTER.with(|v| {
         v.set(v.get() + 1);
         v.get()
     });
 
     console_log!(&format!("WASM Counter: {}", counter));
-    Promise::resolve(&JsValue::from(counter))
+    counter
 }
 
 /// This function is called to initialize the encrypted tunnel.
+/// The mode is a dead argument supplied for backwards compatibility.
+///
+/// The config object is expected to have the following structure:
+/// ```js
+/// export interface InitConfig {
+///    // The list of providers to establish the encrypted tunnel with.
+///    providers:   string[];
+///    // The proxy URL to establish the encrypted tunnel.
+///    proxy:       string;
+///    // Deprecated: use `staticPaths` instead.
+///    staticPath:  string;
+///    // The list of paths to serve static assets from.
+///    staticPaths: string[];
+/// }
+/// ```
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(this_: js_sys::Object, _args: js_sys::Array) -> JsValue {
-    let mut providers = Vec::new();
-    let mut proxy = String::new();
+pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _mode: String) -> Result<(), JsError> {
+    let init_config = InitConfig::try_from(init_config)?;
+
+    // populating the staticPaths static
+    STATIC_PATHS.with(|v| {
+        console_log!(&format!("Static paths: {:?}", init_config.static_paths));
+        v.replace(init_config.static_paths.clone());
+    });
 
     let cache = INDEXED_DBS.with(|v| {
         let val = v.get(INDEXED_DB_CACHE).expect_throw("expected indexed db to be present; qed");
@@ -625,59 +643,24 @@ pub async fn init_encrypted_tunnel(this_: js_sys::Object, _args: js_sys::Array) 
 
     clear_expired_cache(INDEXED_DB_CACHE, cache);
 
-    let mut error_destructuring = false;
-    let entries = object_entries(&this_);
-    for entry in entries.iter() {
-        let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
-        match val.get(0).as_string().expect_throw("key is a string; qed").as_str() {
-            "providers" => {
-                // providers is a list of strings
-                let providers_entries = js_sys::Array::from(&val.get(1));
-                providers_entries.iter().for_each(|provider| {
-                    providers.push(provider.as_string().expect_throw("provider is a string; qed"));
-                });
-            }
-
-            "proxy" => {
-                proxy = val.get(1).as_string().expect_throw("proxy is a string; qed");
-            }
-
-            "staticPath" => {
-                STATIC_PATH.with(|v| {
-                    let path = val.get(1).as_string().expect_throw("staticPath is a string; qed");
-                    console_log!(&format!("Static path: {}", path));
-                    v.replace(path);
-                });
-            }
-
-            _ => {
-                error_destructuring = true;
-            }
-        }
-    }
-
-    if error_destructuring {
-        let err = JsError::new("Unable to destructure the layer8 encrypted object.");
-        console_log!("Error: unable to destructure the layer8 encrypted object.");
-        return Promise::reject(&err.into()).into();
-    }
-
-    for provider in providers.clone() {
+    for provider in init_config.providers.iter() {
         console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
-        if let Err(err) = init_tunnel(&provider, &proxy).await {
+        if let Err(err) = init_tunnel(&provider, &init_config.proxy).await {
             console_error!(&format!(
                 "Failed to establish encrypted tunnel with provider: {}. Error: {}",
                 provider, err
             ));
             let err = JsError::new(&err);
-            return Promise::reject(&err.into()).into();
+            return Err(err);
         } else {
             console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
         }
     }
 
-    console_log!(&format!("Encrypted tunnel established with providers: {:?}", providers));
-    Promise::resolve(&JsValue::null()).into()
+    Ok(console_log!(&format!(
+        "Encrypted tunnel established with providers: {:?}",
+        init_config.providers
+    )))
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
