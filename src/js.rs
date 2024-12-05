@@ -78,7 +78,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
     for static_path in static_paths.iter() {
         if url.contains(static_path) {
-            req_url.push_str(&static_path);
+            req_url.push_str(static_path);
             break;
         }
     }
