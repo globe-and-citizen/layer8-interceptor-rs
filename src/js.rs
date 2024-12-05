@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::HashMap};
 
 use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use js_sys::{Array, Object, Promise, Uint8Array};
+use js_sys::{Array, Object, Uint8Array};
 use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
 use url::Url;
@@ -13,65 +13,8 @@ use web_sys::{File, FormData, Response, ResponseInit};
 use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
 use layer8_primitives::types::{self, new_client};
 
+use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness};
-
-/// This block imports Javascript functions that are provided by the JS Runtime.
-#[wasm_bindgen]
-extern "C" {
-    #[cfg(debug_assertions)]
-    #[wasm_bindgen(js_namespace = console, js_name = log)]
-    fn console_log(s: &str);
-
-    #[cfg(debug_assertions)]
-    #[wasm_bindgen(js_namespace = console, js_name = error)]
-    fn console_error(s: &str);
-
-    #[wasm_bindgen(js_namespace = Object, js_name = entries)]
-    fn object_entries(obj: &Object) -> js_sys::Array;
-
-    #[wasm_bindgen(js_namespace = Object, catch)]
-    fn get_prototype_of(obj: &JsValue) -> Result<JsValue, JsValue>;
-
-    #[wasm_bindgen(js_namespace = Function, js_name = toString)]
-    fn to_string(func: &JsValue) -> String;
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! console_log {
-    ($msg:expr) => {
-        ()
-    };
-}
-
-#[cfg(debug_assertions)]
-macro_rules! console_log {
-    ($msg:expr) => {
-        console_log($msg)
-    };
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! console_error {
-    ($msg:expr) => {
-        ()
-    };
-}
-
-#[cfg(debug_assertions)]
-macro_rules! console_error {
-    ($msg:expr) => {
-        console_error($msg)
-    };
-}
-
-/// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
-#[wasm_bindgen(module = "/src/js/indexed_db.js")]
-extern "C" {
-    fn open_db(db_name: &str, db_cache: DbCache);
-    fn clear_expired_cache(db_name: &str, db_cache: DbCache);
-    #[wasm_bindgen(catch)]
-    fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: i32) -> Result<String, JsValue>;
-}
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
@@ -80,14 +23,14 @@ const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2; // 2 days in seconds
 
 thread_local! {
     static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
-    static COUNTER: Cell<u32> = const { Cell::new(0) };
+    static COUNTER: Cell<i32> = const { Cell::new(0) };
     static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
     static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
     static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
     static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
     static UP_JWT: Cell<String> = Cell::new("".to_string());
     static UUID: Cell<String> = Cell::new("".to_string());
-    static STATIC_PATHS: Cell<Vec<String>> = Cell::new(vec![]);
+    static STATIC_PATHS: Cell<Vec<String>> = const { Cell::new(vec![]) };
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
 
     /// The cache instantiates with the `_layer8cache` IndexedDB.
@@ -133,7 +76,12 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         val.get(&req_url).cloned()
     });
 
-    // req_url.push_str(&static_paths);
+    for static_path in static_paths.iter() {
+        if url.contains(static_path) {
+            req_url.push_str(&static_path);
+            break;
+        }
+    }
 
     console_log!(&format!("Request URL: {}", req_url));
 
@@ -224,7 +172,7 @@ pub async fn check_encrypted_tunnel() -> bool {
 
 /// This function is an override of the fetch function. It's arguments are a URL and an options object.
 #[wasm_bindgen]
-pub async fn fetch(url: String, options: Object) -> Result<Response, JsError> {
+pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
     if !ENCRYPTED_TUNNEL_FLAG.get() {
         return Err(JsError::new("Encrypted tunnel is closed. Reload page."));
     }
@@ -236,6 +184,7 @@ pub async fn fetch(url: String, options: Object) -> Result<Response, JsError> {
 
     let mut js_body = JsValue::null();
     if !options.is_null() && !options.is_undefined() {
+        let options = Object::from(options);
         // [[key, value], ...] result from Object.entries
         let entries = object_entries(&options);
 
@@ -599,7 +548,7 @@ pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
 /// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
-pub async fn persistence_check() -> u32 {
+pub async fn persistence_check() -> i32 {
     let counter = COUNTER.with(|v| {
         v.set(v.get() + 1);
         v.get()
@@ -645,7 +594,7 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _mode: String) -
 
     for provider in init_config.providers.iter() {
         console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
-        if let Err(err) = init_tunnel(&provider, &init_config.proxy).await {
+        if let Err(err) = init_tunnel(provider, &init_config.proxy).await {
             console_error!(&format!(
                 "Failed to establish encrypted tunnel with provider: {}. Error: {}",
                 provider, err

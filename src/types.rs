@@ -1,8 +1,7 @@
-use js_sys::Object;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-
+use crate::js_imports;
 
 /// This type represents the configuration object that is passed to the `init` function.
 ///
@@ -30,21 +29,19 @@ impl TryFrom<js_sys::Object> for InitConfig {
     type Error = JsError;
 
     fn try_from(obj: js_sys::Object) -> Result<Self, Self::Error> {
-        let entries = object_entries(&obj);
+        let entries = js_imports::object_entries(&obj);
 
         let mut init_config = InitConfig::default();
         for entry in entries.iter() {
             let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
             match val.get(0).as_string().ok_or(JsError::new("expected object key to be a string"))?.as_str() {
                 "providers" => {
-                    // providers is a list of strings
-                    let providers = match js_sys::Array::try_from(val.get(1)) {
-                        Ok(providers) => providers,
-                        Err(_) => return Err(JsError::new("expected `InitConfig.providers` value to be an array")),
-                    };
+                    if !val.get(1).is_instance_of::<js_sys::Array>() {
+                        return Err(JsError::new("expected `InitConfig.providers` value to be an array"));
+                    }
 
-                    for provider in providers.iter() {
-                        let value = provider
+                    for provider in js_sys::Array::from(&val.get(1)).iter() {
+                        let value: String = provider
                             .as_string()
                             .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?;
                         init_config.providers.push(value);
@@ -68,12 +65,11 @@ impl TryFrom<js_sys::Object> for InitConfig {
 
                 "staticPaths" => {
                     // paths is a list of strings
-                    let paths = match js_sys::Array::try_from(val.get(1)) {
-                        Ok(paths) => paths,
-                        Err(_) => return Err(JsError::new("expected `InitConfig.staticPaths` value to be an array")),
-                    };
+                    if !val.get(1).is_instance_of::<js_sys::Array>() {
+                        return Err(JsError::new("expected `InitConfig.staticPaths` value to be an array"));
+                    }
 
-                    for path in paths.iter() {
+                    for path in js_sys::Array::from(&val.get(1)).iter() {
                         let value = path
                             .as_string()
                             .ok_or(JsError::new("expected `InitConfig.staticPaths` value to be a string"))?;
@@ -96,64 +92,64 @@ impl TryFrom<js_sys::Object> for InitConfig {
 }
 
 #[derive(Clone)]
-#[wasm_bindgen]
+#[wasm_bindgen(getter_with_clone)]
 pub struct DbCache {
-    pub(crate) store: String,
-    pub(crate) key_path: String,
-    pub(crate) indexes: Indexes,
+    pub store: String,
+    pub key_path: String,
+    pub indexes: Indexes,
 }
 
-#[allow(non_snake_case)]
-#[wasm_bindgen]
-impl DbCache {
-    #[wasm_bindgen(constructor)]
-    pub fn new(store: String, key_path: String, indexes: Indexes) -> DbCache {
-        DbCache { store, key_path, indexes }
-    }
+// #[allow(non_snake_case)]
+// #[wasm_bindgen]
+// impl DbCache {
+// #[wasm_bindgen(constructor)]
+// pub fn new(store: String, key_path: String, indexes: Indexes) -> DbCache {
+//     DbCache { store, key_path, indexes }
+// }
 
-    #[wasm_bindgen(getter)]
-    pub fn store(&self) -> String {
-        self.store.clone()
-    }
+// #[wasm_bindgen(getter)]
+// pub fn store(&self) -> String {
+//     self.store.clone()
+// }
 
-    #[wasm_bindgen(setter)]
-    pub fn set_store(&mut self, store: String) {
-        self.store = store;
-    }
+// #[wasm_bindgen(setter)]
+// pub fn set_store(&mut self, store: String) {
+//     self.store = store;
+// }
 
-    #[wasm_bindgen(getter)]
-    pub fn key_path(&self) -> String {
-        self.key_path.clone()
-    }
+// #[wasm_bindgen(getter)]
+// pub fn key_path(&self) -> String {
+//     self.key_path.clone()
+// }
 
-    #[wasm_bindgen(setter)]
-    pub fn set_key_path(&mut self, key_path: String) {
-        self.key_path = key_path;
-    }
+// #[wasm_bindgen(setter)]
+// pub fn set_key_path(&mut self, key_path: String) {
+//     self.key_path = key_path;
+// }
 
-    #[wasm_bindgen(getter)]
-    pub fn indexes(&self) -> js_sys::Object {
-        let obj = js_sys::Object::new();
-        js_sys::Reflect::set(
-            &obj,
-            &"url".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes.url).expect_throw("failed to serialize url index"),
-        )
-        .unwrap();
-        js_sys::Reflect::set(
-            &obj,
-            &"_exp".into(),
-            &serde_wasm_bindgen::to_value(&self.indexes._exp).expect_throw("failed to serialize url index"),
-        )
-        .unwrap();
-        obj
-    }
+// #[wasm_bindgen(getter)]
+// pub fn indexes(&self) -> js_sys::Object {
+//     let obj = js_sys::Object::new();
+//     js_sys::Reflect::set(
+//         &obj,
+//         &"url".into(),
+//         &serde_wasm_bindgen::to_value(&self.indexes.url).expect_throw("failed to serialize url index"),
+//     )
+//     .unwrap();
+//     js_sys::Reflect::set(
+//         &obj,
+//         &"_exp".into(),
+//         &serde_wasm_bindgen::to_value(&self.indexes._exp).expect_throw("failed to serialize url index"),
+//     )
+//     .unwrap();
+//     obj
+// }
 
-    #[wasm_bindgen(setter)]
-    pub fn set_indexes(&mut self, indexes: Indexes) {
-        self.indexes = indexes;
-    }
-}
+// #[wasm_bindgen(setter)]
+// pub fn set_indexes(&mut self, indexes: Indexes) {
+//     self.indexes = indexes;
+// }
+// }
 
 #[wasm_bindgen]
 #[derive(Clone, Serialize, Deserialize)]
