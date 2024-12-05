@@ -1,6 +1,6 @@
 // We have this here as there is no native support for IndexedDB in wasm_bindgen
 // TODO: https://github.com/rustwasm/gloo/issues/68#issuecomment-606951683
-export function open_db(db_name, db_cache) {
+function open_db(db_name, db_cache) {
     if (db_cache === null || db_cache === undefined) {
         console.error(`The IndexedDB ${db_name} does not exist.`)
         return null
