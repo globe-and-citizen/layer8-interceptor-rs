@@ -89,6 +89,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         method: "GET".to_string(),
         headers: HashMap::new(),
         body: json_body.as_bytes().to_vec(),
+        ..Default::default()
     };
 
     let symmetric_key = {
@@ -230,6 +231,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
         }
     }
 
+    let proxy_url = rebuild_url(&url);
     let client = {
         let l8_clients = L8_CLIENTS.with(|v| {
             let val = v.take();
@@ -237,7 +239,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             val
         });
 
-        match l8_clients.get(&rebuild_url(&url)).cloned() {
+        match l8_clients.get(&proxy_url).cloned() {
             Some(client) => client,
             None => {
                 return Err(JsError::new("client could not be found"));
@@ -284,7 +286,8 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
                 req.body = js_body.as_string().expect_throw("expected body to be a string; qed").as_bytes().to_vec();
             }
 
-            match client.r#do(&req, &symmetric_key, &url, true, &up_jwt, &uuid).await {
+            req.url_path = Some(url.clone());
+            match client.r#do(&req, &symmetric_key, &proxy_url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
                     console_log!(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
@@ -337,7 +340,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             });
 
             req.body = serde_json::to_vec(&form_data).unwrap();
-            match client.r#do(&req, &symmetric_key, &url, true, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &proxy_url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
                     return Err(JsError::new(&e));
