@@ -1,9 +1,9 @@
 // We have this here as there is no native support for IndexedDB in wasm_bindgen
 // TODO: https://github.com/rustwasm/gloo/issues/68#issuecomment-606951683
 function open_db(db_name, db_cache) {
-    if (db_cache === null || db_cache === undefined) {
-        console.error(`The IndexedDB ${db_name} does not exist.`)
-        return null
+    if (!db_name) {
+        console.error('The db_name is required.');
+        return null;
     }
 
     let db
@@ -12,6 +12,12 @@ function open_db(db_name, db_cache) {
     } catch (e) {
         console.error('Error opening IndexedDB database: ', e)
         return null
+    }
+
+    // if the db_cache object is not provided, return the db object
+    if (!db_cache) {
+        console.log('No cache object provided.')
+        return db
     }
 
     db.onupgradeneeded = function (event) {
@@ -63,9 +69,8 @@ export function clear_expired_cache(db_name, db_cache) {
 // Interacts with the IndexedDB method transact with the cache
 export function serve_static(db_name, body, file_type, url, _exp) {
     let db = open_db(db_name, body)
-    if (db === null) {
+    if (!db)
         return
-    }
 
     db.onsuccess = function (event) {
         var db = event.target.result
@@ -92,4 +97,44 @@ export function serve_static(db_name, body, file_type, url, _exp) {
     });
 
     return URL.createObjectURL(blob)
+}
+
+export function check_if_exists(db_name, url) {
+    return new Promise((resolve, reject) => {
+        let db = open_db(db_name);
+
+        if (!db) {
+            resolve(null);
+            return;
+        }
+
+        db.onsuccess = function (event) {
+            var db = event.target.result;
+            var transaction = db.transaction(['static'], 'readonly');
+            var store = transaction.objectStore('static');
+            var index = store.index('url');
+            var request = index.get(url);
+
+            request.onsuccess = function (event) {
+                if (request.result && request.result.body) {
+                    const blob = new Blob([request.result.body], { type: request.result._type });
+                    resolve(URL.createObjectURL(blob));
+                    return;
+                } else {
+                    console.log('Asset not found in cache');
+                    resolve(null);
+                }
+            };
+
+            request.onerror = function (event) {
+                console.log('Error retrieving asset from cache: ', event.target.error);
+                reject(event.target.error);
+            };
+        };
+
+        db.onerror = function (event) {
+            console.log('Error opening database: ', event.target.error);
+            reject(event.target.error);
+        };
+    });
 }

@@ -30,7 +30,7 @@ const layer8Auth = new ClientOAuth2({
   scopes: ['read:user']
 })
 
-const upload = layer8_middleware_rs.ProcessMultipart({
+const upload = layer8_middleware_rs.multipart({
   dest: 'pictures/dynamic'
 })
 
@@ -49,7 +49,7 @@ app.get('/', (req, res) => {
 app.use(layer8_middleware_rs.tunnel)
 
 app.use(cors())
-app.use('/media', layer8_middleware_rs._static('pictures'))
+app.use('/media', layer8_middleware_rs.static('pictures'))
 app.use('/test', (req, res) => {
   res.status(200).json({ message: 'Test endpoint' })
 })
@@ -171,7 +171,7 @@ app.post('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/profile/upload', (req, res) => {
-  upload.single(req, res)
+  upload.single("file")(req, res, null)
 
   const uploadedFile = req.file
 

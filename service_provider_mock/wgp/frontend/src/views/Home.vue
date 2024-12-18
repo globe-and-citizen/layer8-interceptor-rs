@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import { fetch , static_} from 'layer8-interceptor-rs'
+import { fetch , _static } from 'layer8-interceptor-rs'
  
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
 const router = useRouter();
@@ -55,7 +55,7 @@ const logoutUser = () => {
 onMounted(async()=>{
   let user = localStorage.getItem("_user") ? JSON.parse(localStorage.getItem("_user")) : null
   console.log(user)
-  let url = await static_(user.profile_image);
+  let url = await _static(user.profile_image);
   const pictureBox = document.getElementById("pictureBox");
   pictureBox.src = url;
 

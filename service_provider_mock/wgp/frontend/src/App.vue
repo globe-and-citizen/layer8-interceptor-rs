@@ -7,8 +7,12 @@ const PROXY_URL =  import.meta.env.VITE_PROXY_URL
 try{
   initEncryptedTunnel({
     providers: [BACKEND_URL],
-    proxy: PROXY_URL
-  }, "dev")
+    proxy: PROXY_URL,
+    staticPaths: [
+      "/media",
+      "/camera",
+    ]
+  }, "dev");
 }catch(err){
   console.log(".initEncryptedTunnel error: ", err)
 }

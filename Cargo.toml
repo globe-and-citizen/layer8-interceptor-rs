@@ -1,7 +1,7 @@
 [package]
 name = "layer8-interceptor-rs"
 # The versions have no bearing, only for the PoC publishing to npm before migrating to the Org account                                                  
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
