@@ -171,7 +171,7 @@ app.post('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/profile/upload', (req, res) => {
-  upload.single("file")(req, res, null)
+  upload.single("file")(req, res)
 
   const uploadedFile = req.file
 
