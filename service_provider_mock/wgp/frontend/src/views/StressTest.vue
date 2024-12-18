@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import Navbar from "../components/Navbar.vue";
-import { checkEncryptedTunnel, testWASM, fetch, static_ } from 'layer8-interceptor-rs'
+import { checkEncryptedTunnel, testWASM, fetch, _static } from 'layer8-interceptor-rs'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
 const requestsSent = ref(0);
@@ -51,7 +51,7 @@ async function getNextPicture() {
     BACKEND_URL + '/media/boy.png',
     BACKEND_URL + '/media/girl.png'
   ]
-  let url = await static_(pictureURLs[idx]);
+  let url = await _static(pictureURLs[idx]);
   const element = document.getElementById("pictureBox");
   element.src = url;
   x++
