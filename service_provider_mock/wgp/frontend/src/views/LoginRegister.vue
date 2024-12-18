@@ -3,7 +3,7 @@
 import { computed, ref } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import { fetch, static_} from 'layer8-interceptor-rs'
+import { fetch, _static} from 'layer8-interceptor-rs'
 
 // Variables
 const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
@@ -151,7 +151,7 @@ const uploadProfilePicture = async (e) => {
     .then((res) => res.json())
     .then(async (data) => {
       profileImage.value = data.url;
-      const url = await static_(data.url);
+      const url = await _static(data.url);
       const element = document.getElementById("im");
       element.src = url;
     })

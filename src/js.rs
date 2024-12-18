@@ -13,6 +13,7 @@ use web_sys::{File, FormData, Response, ResponseInit};
 use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
 use layer8_primitives::types::{self, new_client};
 
+use crate::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness};
 
@@ -61,6 +62,24 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         return Err(JsError::new("Invalid url provided to fetch call"));
     }
 
+    match check_if_asset_exists(INDEXED_DB_CACHE, &url).await {
+        Ok(val) => {
+            if let Some(val) = val.as_string() {
+                if !val.is_empty() {
+                    // if file is in cache, short-circuit
+                    return Ok(val);
+                }
+            }
+        }
+        Err(e) => {
+            console_log!(&format!("error is {:?}", e));
+            return Err(JsError::new(&format!(
+                "Error occurred interacting with IndexDB: {}",
+                e.as_string().unwrap_or("error unwrappable".to_string())
+            )));
+        }
+    };
+
     let static_paths = STATIC_PATHS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
@@ -68,7 +87,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
     });
 
     let json_body = format!("{{\"__url_path\": \"{}\"}}", url);
-    let mut req_url = rebuild_url(&url);
+    let req_url = rebuild_url(&url);
 
     let client = L8_CLIENTS.with(|v| {
         let val = v.take();
@@ -76,9 +95,10 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         val.get(&req_url).cloned()
     });
 
+    let mut assets_glob_url = req_url.clone();
     for static_path in static_paths.iter() {
         if url.contains(static_path) {
-            req_url.push_str(static_path);
+            assets_glob_url.push_str(static_path);
             break;
         }
     }
@@ -87,9 +107,9 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
     let req = types::Request {
         method: "GET".to_string(),
-        headers: HashMap::new(),
+        headers: HashMap::from([("content-type".to_string(), "application/json".to_string())]),
         body: json_body.as_bytes().to_vec(),
-        ..Default::default()
+        url_path: Some(assets_glob_url.clone()),
     };
 
     let symmetric_key = {
@@ -128,7 +148,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
             Ok(val) => val,
             Err(e) => {
                 console_log!(&format!(
-                    "Failed to fetch_: {}\nWith request {:?}\nWith headers {:?}",
+                    "Failed to fetch: {}\nWith request {:?}\nWith headers {:?}",
                     e,
                     String::from_utf8_lossy(&req.body),
                     req.headers
@@ -149,7 +169,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         }
     };
 
-    let object_url = match serve_static(INDEXED_DB_CACHE, &res.body, &file_type, req_url.as_str(), INDEXED_DB_CACHE_TTL) {
+    let object_url = match serve_static(INDEXED_DB_CACHE, &res.body, &file_type, &url, INDEXED_DB_CACHE_TTL) {
         Ok(val) => val,
         Err(e) => {
             return Err(JsError::new(&format!(
@@ -180,6 +200,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
 
     let mut req = types::Request {
         method: "GET".to_string(),
+        url_path: Some(url.clone()),
         ..Default::default()
     };
 
@@ -305,7 +326,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             }
 
             // populating the form data from the body
-            let form_data = match construct_form_data(&js_body, &url).await {
+            let form_data = match construct_form_data(&js_body).await {
                 Ok(val) => val,
                 Err(e) => {
                     return Err(JsError::new(&e));
@@ -378,19 +399,8 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
     Ok(response)
 }
 
-async fn construct_form_data(js_body: &JsValue, url_path: &str) -> Result<HashMap<String, Value>, String> {
-    let mut form_data = HashMap::from([(
-        "__url_path".to_string(),
-        serde_json::to_value(HashMap::from([(
-            "_type".to_string(),
-            json!({
-                "_type": "String",
-                "value": url_path.to_string(),
-            }),
-        )]))
-        .unwrap(),
-    )]);
-
+async fn construct_form_data(js_body: &JsValue) -> Result<HashMap<String, Value>, String> {
+    let mut form_data = HashMap::<String, Value>::new();
     for entry in FormData::entries(&FormData::from(js_body.clone())) {
         let entry = entry.map_err(|err| {
             let msg = format!(
