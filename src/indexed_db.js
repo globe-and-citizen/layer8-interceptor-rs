@@ -73,25 +73,13 @@ export async function serve_static(db_name, body, asset_size_limit, file_type, u
 
     // we've reached our limit no more caching
     if (used_storage + (body.length / (1024 * 1024)) > asset_size_limit) {
-
-        console.log('Storage limit reached, not caching asset...')
-        console.log('Asset size: ', body.length / (1024 * 1024), 'MB')
-        console.log('Storage used: ', used_storage, 'MB')
-        console.log('Storage limit: ', asset_size_limit, 'MB')
-
+        console.log(`Storage limit ${asset_size_limit} MB reached, not caching asset...`)
         const blob = new Blob([body], {
             type: file_type
         });
 
         return URL.createObjectURL(blob)
-    } else {
-        console.log('Storage limit not reached, caching asset...')
-
-        console.log('Asset size: ', body.length / (1024 * 1024), 'MB')
-        console.log('Storage used: ', used_storage, 'MB')
-        console.log('Storage limit: ', asset_size_limit, 'MB')
     }
-
 
     let db = open_db(db_name, body)
     if (!db)
