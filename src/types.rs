@@ -1,7 +1,14 @@
+use std::cell::Cell;
+
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::js_imports;
+use crate::js_imports::{self, get_storage_estimate};
+
+thread_local! {
+    /// We are using a default asset size limit ot 50MB. This value can be overridden by the initialization config.
+    pub(crate) static CACHE_STORAGE_LIMIT: Cell<u32> = const { Cell::new(50) };
+}
 
 /// This type represents the configuration object that is passed to the `init` function.
 ///
@@ -16,6 +23,8 @@ use crate::js_imports;
 ///    staticPath:  string;
 ///    // The list of paths to serve static assets from.
 ///    staticPaths: string[];
+///    // The maximum size of assets to cache. The value is in MB.
+///    cacheAssetLimit?: number;
 /// }
 /// ```
 #[derive(Default)]
@@ -25,13 +34,11 @@ pub(crate) struct InitConfig {
     pub(crate) static_paths: Vec<String>,
 }
 
-impl TryFrom<js_sys::Object> for InitConfig {
-    type Error = JsError;
-
-    fn try_from(obj: js_sys::Object) -> Result<Self, Self::Error> {
-        let entries = js_imports::object_entries(&obj);
-
+impl InitConfig {
+    pub async fn new(obj: js_sys::Object) -> Result<Self, JsError> {
         let mut init_config = InitConfig::default();
+
+        let entries = js_imports::object_entries(&obj);
         for entry in entries.iter() {
             let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
             match val.get(0).as_string().ok_or(JsError::new("expected object key to be a string"))?.as_str() {
@@ -74,6 +81,27 @@ impl TryFrom<js_sys::Object> for InitConfig {
                             .as_string()
                             .ok_or(JsError::new("expected `InitConfig.staticPaths` value to be a string"))?;
                         init_config.static_paths.push(value);
+                    }
+                }
+
+                "cacheAssetLimit" => {
+                    // if we can't get the storage estimate, we rely on the default value
+                    let estimate = get_storage_estimate().await;
+                    if let Ok(estimate) = estimate {
+                        let mut val = val
+                            .get(1)
+                            .as_f64()
+                            .ok_or(JsError::new("expected `InitConfig.cacheAssetLimit` value to be a number"))?;
+
+                        let estimate = estimate.as_f64().expect_throw("expected storage estimate to be a number");
+
+                        if val > estimate {
+                            // we are going with half the estimate
+                            // estimates are usually [very large]<https://developer.mozilla.org/en-US/play?id=qHEOFcbSol%2Bevp8cXcV4AHeiMNC9eg1hPfouaBm%2Fdv3CX6MmH3pAqbE018v9o2C0XOIUTTJe%2BTlzxxbC>
+                            val = estimate * 0.5;
+                        }
+
+                        CACHE_STORAGE_LIMIT.with(|limit| limit.set(val as u32));
                     }
                 }
 

@@ -15,7 +15,7 @@ use layer8_primitives::types::{self, new_client};
 
 use crate::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
-use crate::types::{DbCache, InitConfig, Uniqueness};
+use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
@@ -169,8 +169,17 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         }
     };
 
-    let object_url = match serve_static(INDEXED_DB_CACHE, &res.body, &file_type, &url, INDEXED_DB_CACHE_TTL) {
-        Ok(val) => val,
+    let object_url = match serve_static(
+        INDEXED_DB_CACHE,
+        &res.body,
+        CACHE_STORAGE_LIMIT.with(|v| v.get()),
+        &file_type,
+        &url,
+        INDEXED_DB_CACHE_TTL,
+    )
+    .await
+    {
+        Ok(val) => val.as_string().expect_throw("expected object url to be a string").to_string(),
         Err(e) => {
             return Err(JsError::new(&format!(
                 "Error occurred interacting with IndexDB: {}",
@@ -590,7 +599,7 @@ pub async fn persistence_check() -> i32 {
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
 pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _mode: String) -> Result<(), JsError> {
-    let init_config = InitConfig::try_from(init_config)?;
+    let init_config = InitConfig::new(init_config).await?;
 
     // populating the staticPaths static
     STATIC_PATHS.with(|v| {

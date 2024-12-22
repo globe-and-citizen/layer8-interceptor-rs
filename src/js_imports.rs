@@ -29,9 +29,18 @@ extern "C" {
 extern "C" {
     pub fn clear_expired_cache(db_name: &str, db_cache: DbCache);
     #[wasm_bindgen(catch)]
-    pub fn serve_static(db_name: &str, body: &[u8], file_type: &str, url: &str, exp_in_seconds: i32) -> Result<String, JsValue>;
+    pub async fn serve_static(
+        db_name: &str,
+        body: &[u8],
+        asset_size_limit: u32,
+        file_type: &str,
+        url: &str,
+        exp_in_seconds: i32,
+    ) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(js_name = check_if_exists, catch)]
     pub async fn check_if_asset_exists(db_name: &str, url: &str) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch)]
+    pub async fn get_storage_estimate() -> Result<JsValue, JsValue>;
 }
 
 #[macro_export]
