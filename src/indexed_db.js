@@ -20,9 +20,9 @@ function open_db(db_name, db_cache) {
         return db
     }
 
-    db.onupgradeneeded = function (event) {
-        var objectStore = event.target.result.createObjectStore(db_cache.store, {
-            keyPath: db_cache.keyPath
+    db.onupgradeneeded = function () {
+        var objectStore = db.result.createObjectStore(db_cache.store, {
+            keyPath: db_cache.key_path,
         })
 
         objectStore.createIndex('url', 'url', {
@@ -45,9 +45,8 @@ function open_db(db_name, db_cache) {
 // Interacts with the IndexedDB method to clear expired cache
 export function clear_expired_cache(db_name, db_cache) {
     let db = open_db(db_name, db_cache)
-    if (db === null) {
+    if (!db)
         return
-    }
 
     db.onsuccess = function (event) {
         var db = event.target.result
@@ -67,7 +66,33 @@ export function clear_expired_cache(db_name, db_cache) {
 }
 
 // Interacts with the IndexedDB method transact with the cache
-export function serve_static(db_name, body, file_type, url, _exp) {
+export async function serve_static(db_name, body, asset_size_limit, file_type, url, _exp) {
+    const used_storage = await get_indexedDB_storage()
+    if (!used_storage)
+        used_storage = 0
+
+    // we've reached our limit no more caching
+    if (used_storage + (body.length / (1024 * 1024)) > asset_size_limit) {
+
+        console.log('Storage limit reached, not caching asset...')
+        console.log('Asset size: ', body.length / (1024 * 1024), 'MB')
+        console.log('Storage used: ', used_storage, 'MB')
+        console.log('Storage limit: ', asset_size_limit, 'MB')
+
+        const blob = new Blob([body], {
+            type: file_type
+        });
+
+        return URL.createObjectURL(blob)
+    } else {
+        console.log('Storage limit not reached, caching asset...')
+
+        console.log('Asset size: ', body.length / (1024 * 1024), 'MB')
+        console.log('Storage used: ', used_storage, 'MB')
+        console.log('Storage limit: ', asset_size_limit, 'MB')
+    }
+
+
     let db = open_db(db_name, body)
     if (!db)
         return
@@ -85,7 +110,6 @@ export function serve_static(db_name, body, file_type, url, _exp) {
                     _type: file_type,
                     _exp: _exp
                 },
-                'static'
             )
         } catch (error) {
             console.log(error)
@@ -136,5 +160,32 @@ export function check_if_exists(db_name, url) {
             console.log('Error opening database: ', event.target.error);
             reject(event.target.error);
         };
+    });
+}
+
+export function get_storage_estimate() {
+    return new Promise((resolve, reject) => {
+        navigator.storage.estimate().then(estimate => {
+            const storage_estimate = Math.floor(estimate.quota / 1024 / 1024)
+            resolve(storage_estimate);
+        }).catch(error => {
+            console.error('Error getting storage estimate: ', error);
+            reject(error);
+        });
+    });
+}
+
+function get_indexedDB_storage() {
+    return new Promise((resolve, reject) => {
+        navigator.storage.estimate().then(estimate => {
+            if (estimate.usageDetails && estimate.usageDetails.indexedDB) {
+                const used = estimate.usageDetails.indexedDB;
+                resolve(used / 1024 / 1024);
+            }
+            resolve(undefined);
+        }).catch(error => {
+            console.error('Error getting storage estimate: ', error);
+            reject(error);
+        });
     });
 }
