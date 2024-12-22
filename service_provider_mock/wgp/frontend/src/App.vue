@@ -11,7 +11,8 @@ try{
     staticPaths: [
       "/media",
       "/camera",
-    ]
+    ],
+    cacheAssetLimit: 5 // if we want to cache assets at a limit of 5 MB
   }, "dev");
 }catch(err){
   console.log(".initEncryptedTunnel error: ", err)

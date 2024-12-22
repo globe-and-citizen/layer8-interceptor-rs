@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "autoprefixer": "^10.4.16",
-    "layer8-interceptor-rs": "^0.0.8",
+    "layer8-interceptor-rs": "^0.0.10",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.3",
     "vite-plugin-top-level-await": "^1.4.4",

@@ -6,7 +6,7 @@ function open_db(db_name, db_cache) {
         return null;
     }
 
-    let db
+    let db;
     try {
         db = window.indexedDB.open(db_name, 2)
     } catch (e) {
