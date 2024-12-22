@@ -67,7 +67,7 @@ export function clear_expired_cache(db_name, db_cache) {
 
 // Interacts with the IndexedDB method transact with the cache
 export async function serve_static(db_name, body, asset_size_limit, file_type, url, _exp) {
-    const used_storage = await get_indexedDB_storage()
+    var used_storage = await get_indexedDB_storage()
     if (!used_storage)
         used_storage = 0
 
