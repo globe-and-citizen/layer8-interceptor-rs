@@ -261,7 +261,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
         }
     }
 
-    let proxy_url = rebuild_url(&url);
+    let backend_url = rebuild_url(&url);
     let client = {
         let l8_clients = L8_CLIENTS.with(|v| {
             let val = v.take();
@@ -269,7 +269,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             val
         });
 
-        match l8_clients.get(&proxy_url).cloned() {
+        match l8_clients.get(&backend_url).cloned() {
             Some(client) => client,
             None => {
                 return Err(JsError::new("client could not be found"));
@@ -317,7 +317,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             }
 
             req.url_path = Some(url.clone());
-            match client.r#do(&req, &symmetric_key, &proxy_url, true, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &backend_url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
                     console_log!(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
@@ -370,7 +370,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             });
 
             req.body = serde_json::to_vec(&form_data).unwrap();
-            match client.r#do(&req, &symmetric_key, &proxy_url, true, &up_jwt, &uuid).await {
+            match client.r#do(&req, &symmetric_key, &backend_url, true, &up_jwt, &uuid).await {
                 Ok(res) => res,
                 Err(e) => {
                     return Err(JsError::new(&e));
@@ -721,6 +721,8 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
 }
 
 fn rebuild_url(url: &str) -> String {
+    console_log!(&format!("Rebuilding URL: `{}`", url));
+
     let url = url::Url::parse(url).expect_throw("expected provider to be a valid URL; qed");
     let rebuilt_url = format!("{}://{}", url.scheme(), url.host_str().expect_throw("expected host to be present; qed"));
     match url.port() {
