@@ -20,7 +20,7 @@ use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
-const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2; // 2 days in seconds
+const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in milliseconds
 
 thread_local! {
     static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
