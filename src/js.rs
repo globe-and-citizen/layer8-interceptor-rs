@@ -2,6 +2,7 @@ use std::{cell::Cell, collections::HashMap};
 
 use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{Array, Object, Uint8Array};
+use layer8_primitives::compression::{compress_gzip_and_encode_b64, decompress_data_gzip};
 use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
 use url::Url;
@@ -169,9 +170,21 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         }
     };
 
+    // decompress the file if we compressed it
+    let body = match decompress_data_gzip(&res.body) {
+        Ok(val) => val,
+        Err(e) => {
+            if e.eq("invalid gzip header") {
+                res.body
+            } else {
+                return Err(JsError::new(&format!("Error occurred decompressing file: {}", e)));
+            }
+        }
+    };
+
     let object_url = match serve_static(
         INDEXED_DB_CACHE,
-        &res.body,
+        &body,
         CACHE_STORAGE_LIMIT.with(|v| v.get()),
         &file_type,
         &url,
@@ -550,7 +563,7 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
         "name": name,
         "size": size,
         "type": type_,
-        "buff": base64_enc_dec.encode(&buff)
+        "buff": compress_gzip_and_encode_b64(&buff).map_err(|e| format!("Failed to compress and encode file: {}", e))?,
     }))
 }
 
@@ -666,9 +679,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         })?;
 
     if res.status().eq(&401) {
-        ENCRYPTED_TUNNEL_FLAG.with(|v| {
-            v.set(false);
-        });
+        ENCRYPTED_TUNNEL_FLAG.set(false);
         return Err(String::from("401 response from proxy, user is not authorized."));
     }
 
@@ -694,8 +705,8 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
             .to_string(),
     );
 
-    USER_SYMMETRIC_KEY.replace(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
-    ENCRYPTED_TUNNEL_FLAG.replace(true);
+    USER_SYMMETRIC_KEY.set(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
+    ENCRYPTED_TUNNEL_FLAG.set(true);
 
     let proxy_url = Url::parse(&proxy).map_err(|e| e.to_string())?;
 
