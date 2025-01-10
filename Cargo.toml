@@ -40,4 +40,5 @@ web-sys = { version = "0.3.70", features = [
     'ReadableStream',
     'ReadableStreamDefaultReader',
 ] }
-layer8-primitives = { git = "https://github.com/muse254/layer8-primitives-rs.git", branch = "main" } # TODO: Publish to crates.io
+layer8-primitives = "0.1.1"
+

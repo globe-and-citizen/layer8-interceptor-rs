@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::js_imports::{self, get_storage_estimate};
 
+// These statics are declared here to avoid import cycles if we coupled them with the rest in `./js.rs`.
 thread_local! {
     /// We are using a default asset size limit ot 50MB. This value can be overridden by the initialization config.
     pub(crate) static CACHE_STORAGE_LIMIT: Cell<u32> = const { Cell::new(50) };
