@@ -1,6 +1,5 @@
 use std::{cell::Cell, collections::HashMap};
 
-use base64::{self, engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{Array, Object, Uint8Array};
 use layer8_primitives::compression::{compress_gzip_and_encode_b64, decompress_data_gzip};
 use reqwest::header::HeaderValue;
