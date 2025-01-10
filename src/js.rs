@@ -171,7 +171,10 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
     // decompress the file if we compressed it
     let body = match decompress_data_gzip(&res.body) {
-        Ok(val) => val,
+        Ok(val) => {
+            console_log!("File decompressed successfully");
+            val
+        }
         Err(e) => {
             if e.eq("invalid gzip header") {
                 res.body
@@ -557,12 +560,16 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
         chunk.copy_to(&mut buff[buff_len..]);
     }
 
+    // compress and encode the file
+    let buff = compress_gzip_and_encode_b64(&buff).map_err(|e| format!("Failed to compress and encode file: {}", e))?;
+    console_log!(&format!("File `{name}` compressed and encoded successfully"));
+
     Ok(json!({
         "_type": "File",
         "name": name,
         "size": size,
         "type": type_,
-        "buff": compress_gzip_and_encode_b64(&buff).map_err(|e| format!("Failed to compress and encode file: {}", e))?,
+        "buff": buff,
     }))
 }
 
