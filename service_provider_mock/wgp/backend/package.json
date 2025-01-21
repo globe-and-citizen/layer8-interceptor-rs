@@ -25,7 +25,7 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "layer8-middleware-rs": "^0.1.21",
-    "popsicle": "^8.1.0"
+    "popsicle": "^12.1.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
