@@ -1,23 +1,9 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import router from './router'
 
-createApp(App).mount('#app')
+const app = createApp(App)
 
+app.use(router)
 
-// import WebSocket from 'ws';
-// import Vue from 'vue';
-
-// const wss = new WebSocket.Server({ port: 8080 });
-
-// wss.on('connection', (ws) => {
-//   console.log('Client connected');
-
-//   ws.on('message', (message) => {
-//     console.log(`Received message => ${message}`);
-//     ws.send(`Server received your message => ${message}`);
-//   });
-
-//   ws.on('close', () => {
-//     console.log('Client disconnected');
-//   });
-// });
+app.mount('#app')

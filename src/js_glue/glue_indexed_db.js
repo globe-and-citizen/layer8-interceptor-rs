@@ -1,4 +1,6 @@
 // We have this here as there is no native support for IndexedDB in wasm_bindgen: <https://github.com/rustwasm/gloo/issues/68#issuecomment-606951683>
+
+
 function open_db(db_name, db_cache) {
     if (!db_name) {
         console.error('The db_name is required.');

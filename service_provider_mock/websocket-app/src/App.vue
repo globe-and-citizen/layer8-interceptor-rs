@@ -1,18 +1,13 @@
-<template>
-  <img alt="Vue logo" src="./assets/logo.png">
-  <ChatView />
-</template>
-
-<script>
-import ChatView from './components/ChatView.vue'
-
-export default {
-  name: 'App',
-  components: {
-    ChatView
-  }
-}
+<script setup>
+  import { RouterView } from "vue-router";
 </script>
+
+<template>
+  <div>
+    <img alt="Vue logo" src="./assets/logo.png">
+    <RouterView />
+  </div>
+</template>
 
 <style>
 #app {

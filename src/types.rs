@@ -3,7 +3,7 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::js_imports::{self, get_storage_estimate};
+use crate::js_glue::js_imports::{self, get_storage_estimate};
 
 // These statics are declared here to avoid import cycles if we coupled them with the rest in `./js.rs`.
 thread_local! {
@@ -17,6 +17,7 @@ thread_local! {
 /// ```js
 /// export interface InitConfig {
 ///    // The list of providers to establish the encrypted tunnel with.
+///    // Deprecated: `provider` is used for backwards compatibility, use `provider_protocols` instead.
 ///    providers:   string[];
 ///    // The proxy URL to establish the encrypted tunnel.
 ///    proxy:       string;
@@ -24,15 +25,20 @@ thread_local! {
 ///    staticPath:  string;
 ///    // The list of paths to serve static assets from.
 ///    staticPaths: string[];
+///    // The protocol for the providers to use. The first element is the protocol name, the second is the protocol version.
+///    // If using a supported protocol, say websockets, provide as [['http://example.com', 'ws']].
+///    // If not using a custom protocol, provide as [['http://example.com', 'http']].
+///    // Supported protocols include: ws, http. Note: websockets requires experimental support enabled for the layer8 components.
+///    provider_protocols: [string, string][];
 ///    // The maximum size of assets to cache. The value is in MB.
 ///    cacheAssetLimit?: number;
 /// }
 /// ```
 #[derive(Default)]
 pub(crate) struct InitConfig {
-    pub(crate) providers: Vec<String>,
     pub(crate) proxy: String,
     pub(crate) static_paths: Vec<String>,
+    pub(crate) provider_protocols: Vec<(String, String)>,
 }
 
 impl InitConfig {
@@ -49,10 +55,12 @@ impl InitConfig {
                     }
 
                     for provider in js_sys::Array::from(&val.get(1)).iter() {
-                        let value: String = provider
-                            .as_string()
-                            .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?;
-                        init_config.providers.push(value);
+                        init_config.provider_protocols.push((
+                            provider
+                                .as_string()
+                                .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?,
+                            "http".to_string(),
+                        ))
                     }
                 }
 
@@ -103,6 +111,25 @@ impl InitConfig {
                         }
 
                         CACHE_STORAGE_LIMIT.with(|limit| limit.set(val as u32));
+                    }
+                }
+
+                "provider_protocols" => {
+                    if !val.get(1).is_instance_of::<js_sys::Array>() {
+                        return Err(JsError::new("expected `InitConfig.provider_protocols` value to be an array"));
+                    }
+
+                    for protocol in js_sys::Array::from(&val.get(1)).iter() {
+                        let protocol = js_sys::Array::from(&protocol);
+                        if !protocol.get(0).is_instance_of::<js_sys::Array>() {
+                            return Err(JsError::new("expected `InitConfig.provider_protocols` value to be an array of arrays"));
+                        }
+
+                        let provider_protocol = js_sys::Array::from(&protocol.get(0));
+                        init_config.provider_protocols.push((
+                            provider_protocol.get(0).as_string().expect_throw("expected provider to be a string"),
+                            provider_protocol.get(1).as_string().expect_throw("expected protocol name to be a string"),
+                        ));
                     }
                 }
 
