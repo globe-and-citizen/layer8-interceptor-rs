@@ -11,32 +11,7 @@
 </template>
 
 <script>
-
-// import { onMounted } from 'vue';
-
-
-// var message;
-
-// onMounted(() => {
-// this.socket = new WebSocket('ws://localhost:9086');
-
-// this.socket.onmessage = (event) => {
-//   this.messages.push({ text: event.data, id: Math.random() });
-// };
-
-// this.socket.onopen = () => {
-//   console.log('Connected to the WebSocket server');
-// };
-
-// this.socket.onclose = () => {
-//   console.log('Disconnected from the WebSocket server');
-// };
-// })
-// let socket =  ;
-// const client = new Layer8WebsocketClient('ws://localhost:9086');
-// console.log("Calling method", client.url());
-
-import { Layer8WebsocketClient } from 'layer8-interceptor-rs';
+import { WebSocket } from 'layer8-interceptor-rs';
 
 export default {
   name: 'ChatView',
@@ -47,7 +22,7 @@ export default {
     };
   },
   mounted() {
-    this.socket = new Layer8WebsocketClient('ws://localhost:9086');
+    this.socket = new WebSocket('ws://localhost:9086');
 
     this.socket.onmessage = (event) => {
       this.messages.push({ text: event.data, id: Math.random() });

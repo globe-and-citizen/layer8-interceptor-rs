@@ -727,7 +727,7 @@ version = "0.0.12"
 dependencies = [
  "base64",
  "js-sys",
- "layer8-primitives 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "layer8-primitives",
  "layer8-tungstenite",
  "reqwest",
  "serde",
@@ -743,25 +743,7 @@ dependencies = [
 [[package]]
 name = "layer8-primitives"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eacf017081071d93e190cab13121d5c637b3db1dd8ce1cbf1d250fa3579f3809"
-dependencies = [
- "aes-gcm",
- "base64",
- "flate2",
- "rand",
- "reqwest",
- "secp256k1",
- "serde",
- "serde_json",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "layer8-primitives"
-version = "0.1.1"
-source = "git+https://github.com/globe-and-citizen/layer8-primitives-rs?branch=main#9b5ca364af49969f6678dafbce21ab19d090fcb0"
+source = "git+https://github.com/globe-and-citizen/layer8-primitives-rs.git?branch=main#9b5ca364af49969f6678dafbce21ab19d090fcb0"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -785,7 +767,7 @@ dependencies = [
  "getrandom",
  "http",
  "httparse",
- "layer8-primitives 0.1.1 (git+https://github.com/globe-and-citizen/layer8-primitives-rs?branch=main)",
+ "layer8-primitives",
  "log",
  "rand",
  "sha1",

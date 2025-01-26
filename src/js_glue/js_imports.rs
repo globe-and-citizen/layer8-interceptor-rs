@@ -48,10 +48,10 @@ extern "C" {
     pub async fn get_storage_estimate() -> Result<JsValue, JsValue>;
 }
 
-#[wasm_bindgen(module = "/src/js_glue/glue_websockets.js")]
-extern "C" {
-    // todo: add functionality for this
-}
+// #[wasm_bindgen(module = "/src/js_glue/glue_websockets.js")]
+// extern "C" {
+//     // todo: add functionality for this
+// }
 
 #[macro_export]
 #[cfg(not(debug_assertions))]

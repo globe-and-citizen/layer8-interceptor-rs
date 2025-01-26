@@ -10,8 +10,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{File, FormData, Response, ResponseInit};
 
-use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
+use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map, Jwk};
 use layer8_primitives::types::{self, new_client};
+
+// #[cfg(feature = "websocket")]
+use layer8_tungstenite::{accept, connect, Message};
 
 use crate::js_glue::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
@@ -23,13 +26,14 @@ const INDEXED_DB_CACHE: &str = "_layer8cache";
 const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in milliseconds
 
 thread_local! {
-    static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
+    pub(crate) static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    pub(crate) static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
+    pub(crate) static UP_JWT: Cell<String> = Cell::new("".to_string());
+    pub(crate) static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
+
+    // static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
     static COUNTER: Cell<i32> = const { Cell::new(0) };
-    static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
     static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
-    static UP_JWT: Cell<String> = Cell::new("".to_string());
     static UUID: Cell<String> = Cell::new("".to_string());
     static STATIC_PATHS: Cell<Vec<String>> = const { Cell::new(vec![]) };
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
@@ -652,12 +656,13 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
                     JsError::new(&e)
                 })?;
             }
-            "websocket" => {
-                init_tunnel_websocket(provider, &init_config.proxy).await.map_err(|e| {
-                    console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
-                    JsError::new(&e)
-                })?;
-            }
+            // fixme
+            // "websocket" => {
+            //     init_tunnel_websocket(provider, &init_config.proxy).await.map_err(|e| {
+            //         console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+            //         JsError::new(&e)
+            //     })?;
+            // }
             _ => {
                 console_error!(&format!("Unsupported protocol: {}", protocol));
                 return Err(JsError::new(&format!("Unsupported protocol: {}", protocol)));
@@ -755,11 +760,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     Ok(console_log!(&format!("Encrypted tunnel established with provider: {}", provider)))
 }
 
-async fn init_tunnel_websocket(provider: &str, proxy: &str) -> Result<(), String> {
-    todo!()
-}
-
-fn rebuild_url(url: &str) -> String {
+pub(crate) fn rebuild_url(url: &str) -> String {
     console_log!(&format!("Rebuilding URL: `{}`", url));
 
     let url = url::Url::parse(url).expect_throw("expected provider to be a valid URL; qed");
