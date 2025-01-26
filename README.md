@@ -5,6 +5,51 @@ This repository contains a Rust implementation of the Layer8 Interceptor. Analog
 At the time of writing this document, it is a 1:1 port of the original implementation.
 The offering for this is a smaller wasm binary size and potentially better performance.
 
+## Usage
+
+### With the We've Got Poems example
+
+### With Experimental Features
+
+To use experimental features, you can use the `--features experimental` flag when building the wasm module.
+
+```sh
+make build-experimental
+```
+
+#### Using websockets
+
+To use websockets, we can use our library as so
+
+```js
+import { websocket_init } from 'layer8-interceptor-rs'
+
+// code here...
+mounted() {
+    this.socket = websocket_init(new WebSocket('ws://localhost:9086', 'some-protocol'));
+
+    this.socket.onmessage = (event) => {
+      this.messages.push({ text: event.data, id: Math.random() });
+    };
+
+    this.socket.onopen = () => {
+      console.log('Connected to the WebSocket server');
+    };
+
+    this.socket.onclose = () => {
+      console.log('Disconnected from the WebSocket server');
+    };
+  },
+  methods: {
+    sendMessage() {
+      this.socket.send(this.message);
+      this.message = '';
+    },
+  },
+
+// other code here...
+```
+
 ## How To Build
 
 ### Prerequisites

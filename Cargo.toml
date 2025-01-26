@@ -1,7 +1,7 @@
 [package]
 name = "layer8-interceptor-rs"
 # The versions have no bearing, only for the PoC publishing to npm before migrating to the Org account                                                  
-version = "0.0.11"
+version = "0.0.12"
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
@@ -21,6 +21,15 @@ panic = "abort"
 crate-type = ["cdylib"]
 
 [dependencies]
+web-sys = { version = "0.3.70", features = [
+    "FormData",
+    "File",
+    "Headers",
+    "Response",
+    "ResponseInit",
+    'ReadableStream',
+    'ReadableStreamDefaultReader',
+] }
 wasm-bindgen = "0.2"
 base64 = { version = "0.22.1" }
 serde = { version = "1", features = ["derive"] }
@@ -31,14 +40,15 @@ reqwest = "0.12.7"
 js-sys = "0.3.70"
 serde-wasm-bindgen = "0.6.5"
 uuid = { version = "1", features = ["js"] }
-web-sys = { version = "0.3.70", features = [
-    "FormData",
-    "File",
-    "Headers",
-    "Response",
-    "ResponseInit",
-    'ReadableStream',
-    'ReadableStreamDefaultReader',
-] }
-layer8-primitives = "0.1.1"
+layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "main" }
+layer8-tungstenite = { git = "https://github.com/globe-and-citizen/layer8-tungstenite.git", branch = "master" }
 
+[features]
+default = ["experimental"]
+experimental = ["websocket"]
+websocket = [
+    "web-sys/MessageEvent",
+    "web-sys/BinaryType",
+    "web-sys/Blob",
+    "web-sys/FileReaderSync",
+]

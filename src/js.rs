@@ -10,26 +10,30 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{File, FormData, Response, ResponseInit};
 
-use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
+use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map, Jwk};
 use layer8_primitives::types::{self, new_client};
 
-use crate::js_imports::check_if_asset_exists;
+// #[cfg(feature = "websocket")]
+use layer8_tungstenite::{accept, connect, Message};
+
+use crate::js_glue::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
-const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2; // 2 days in seconds
+const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in milliseconds
 
 thread_local! {
-    static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
+    pub(crate) static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    pub(crate) static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
+    pub(crate) static UP_JWT: Cell<String> = Cell::new("".to_string());
+    pub(crate) static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
+
+    // static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
     static COUNTER: Cell<i32> = const { Cell::new(0) };
-    static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
     static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
-    static UP_JWT: Cell<String> = Cell::new("".to_string());
     static UUID: Cell<String> = Cell::new("".to_string());
     static STATIC_PATHS: Cell<Vec<String>> = const { Cell::new(vec![]) };
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
@@ -574,9 +578,9 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
 }
 
 /// Test promise resolution/rejection from the console.
-/// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = testWASM)]
+#[cfg(debug_assertions)]
 pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
     if arg.is_null() || arg.is_undefined() {
         return Err(JsError::new("The argument is null or undefined."));
@@ -586,9 +590,9 @@ pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
 }
 
 /// This function is called to check the persistence of the WASM module.
-/// TODO: Remove this function in production, when no longer in volatile development.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
+#[cfg(debug_assertions)]
 pub async fn persistence_check() -> i32 {
     let counter = COUNTER.with(|v| {
         v.set(v.get() + 1);
@@ -600,24 +604,32 @@ pub async fn persistence_check() -> i32 {
 }
 
 /// This function is called to initialize the encrypted tunnel.
-/// The mode is a dead argument supplied for backwards compatibility.
+/// The mode is a dead argument; for backwards compatibility.
 ///
 /// The config object is expected to have the following structure:
 /// ```js
 /// export interface InitConfig {
 ///    // The list of providers to establish the encrypted tunnel with.
+///    // Deprecated: `provider` is used for backwards compatibility, use `provider_protocols` instead.
 ///    providers:   string[];
 ///    // The proxy URL to establish the encrypted tunnel.
 ///    proxy:       string;
-///    // Deprecated: use `staticPaths` instead.
+///    // Deprecated: `staticPath` is used for backwards compatibility, use `staticPaths` instead.
 ///    staticPath:  string;
 ///    // The list of paths to serve static assets from.
 ///    staticPaths: string[];
+///    // The protocol for the providers to use. The first element is the protocol name, the second is the protocol version.
+///    // If using a supported protocol, say websockets, provide as [['http://example.com', 'ws']].
+///    // If not using a custom protocol, provide as [['http://example.com', 'http']].
+///    // Supported protocols include: ws, http. Note: websockets requires experimental support enabled for the layer8 components.
+///    provider_protocols: [string, string][];
+///    // The maximum size of assets to cache. The value is in MB.
+///    cacheAssetLimit?: number;
 /// }
 /// ```
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _mode: String) -> Result<(), JsError> {
+pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String>) -> Result<(), JsError> {
     let init_config = InitConfig::new(init_config).await?;
 
     // populating the staticPaths static
@@ -633,24 +645,35 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _mode: String) -
 
     clear_expired_cache(INDEXED_DB_CACHE, cache);
 
-    for provider in init_config.providers.iter() {
+    let mut providers = Vec::new();
+    for (provider, protocol) in init_config.provider_protocols.iter() {
         console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
-        if let Err(err) = init_tunnel(provider, &init_config.proxy).await {
-            console_error!(&format!(
-                "Failed to establish encrypted tunnel with provider: {}. Error: {}",
-                provider, err
-            ));
-            let err = JsError::new(&err);
-            return Err(err);
-        } else {
-            console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
+
+        match protocol.as_str() {
+            "http" => {
+                init_tunnel(provider, &init_config.proxy).await.map_err(|e| {
+                    console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+                    JsError::new(&e)
+                })?;
+            }
+            // fixme
+            // "websocket" => {
+            //     init_tunnel_websocket(provider, &init_config.proxy).await.map_err(|e| {
+            //         console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+            //         JsError::new(&e)
+            //     })?;
+            // }
+            _ => {
+                console_error!(&format!("Unsupported protocol: {}", protocol));
+                return Err(JsError::new(&format!("Unsupported protocol: {}", protocol)));
+            }
         }
+
+        providers.push(provider);
+        console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
     }
 
-    Ok(console_log!(&format!(
-        "Encrypted tunnel established with providers: {:?}",
-        init_config.providers
-    )))
+    Ok(console_log!(&format!("Encrypted tunnel established with providers: {:?}", providers)))
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
@@ -737,7 +760,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     Ok(console_log!(&format!("Encrypted tunnel established with provider: {}", provider)))
 }
 
-fn rebuild_url(url: &str) -> String {
+pub(crate) fn rebuild_url(url: &str) -> String {
     console_log!(&format!("Rebuilding URL: `{}`", url));
 
     let url = url::Url::parse(url).expect_throw("expected provider to be a valid URL; qed");
