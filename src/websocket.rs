@@ -1,82 +1,65 @@
-use std::{cell::Cell, collections::HashMap, net::TcpStream};
-
-use js_sys::{ArrayBuffer, Function};
+use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
+use js_sys::{ArrayBuffer, Function, Uint8Array};
+use std::{cell::RefCell, collections::HashMap};
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Blob, FileReaderSync};
+use web_sys::{BinaryType, Blob, FileReaderSync, MessageEvent, WebSocket as BrowserWebSocket};
 
-use layer8_primitives::crypto::{generate_key_pair, jwk_from_map, KeyUse};
-use layer8_tungstenite::{connect, stream::MaybeTlsStream, Bytes, Message, Utf8Bytes, WebSocket as Layer8WebSocket};
+use layer8_primitives::{
+    crypto::{generate_key_pair, jwk_from_map, KeyUse},
+    types::{Layer8Envelope, WebSocketMetadata, WebSocketPayload},
+};
 
-use crate::js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PUB_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY};
-use crate::js_imports_prelude::*;
+use crate::{
+    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PUB_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY},
+    js_imports_prelude::*,
+};
 
 thread_local! {
-    // This static variable will help us keep track of the websocket streamer. Also we use it here since we can't export generic implementations
-    // to the JS class.
-    static LAYER8_SOCKETS: Cell<HashMap<String, Layer8WebSocket<MaybeTlsStream<TcpStream>>>> = Cell::new(HashMap::new());
+    // This static variable will help us keep track of our websocket wrapper.
+    static LAYER8_SOCKETS: RefCell<HashMap<String, WasmWebSocket>> = RefCell::new(HashMap::new());
 }
 
-/// A websocket client. This is an indirection over the `WebSocket` API: <https://rustwasm.github.io/wasm-bindgen/api/web_sys/struct.WebSocket.html>.
-/// The indirection serves to to maintain a consistent API for the client, regardless of the underlying implementation.
-///
-/// This client first initiates the handshake with the proxy and provider for the ECDH key exchange. After that is done, we are be able to send and receive messages.
-/// It is import to note that this client is expected to be long lived.
-///
-/// Warning: This API is not final and may change in the future.
-#[wasm_bindgen]
-#[derive(Debug, Clone)]
-pub struct WebSocket {
-    url: String,
-    onopen: JsValue,
-    onerror: JsValue,
-    onclose: JsValue,
-    onmessage: JsValue,
+/// The configuration object for the WebSocket.
+#[wasm_bindgen(getter_with_clone)]
+pub struct InitConfig {
+    pub url: String,
+    pub proxy: String,
+    pub protocols: Option<Vec<String>>,
 }
 
-impl Drop for WebSocket {
+// The WebSocket input-output stream using the browser's WebSocket API.
+#[derive(Debug)]
+struct WasmWebSocket {
+    // This is the actual WebSocket object.
+    socket: BrowserWebSocket,
+}
+
+/// This is a reference to the WebSocket object.
+/// The implementation does not support SharedArrayBuffers.
+#[wasm_bindgen(js_name = L8WebSocket)]
+#[derive(Debug)]
+struct WasmWebSocketRef(String);
+
+impl Drop for WasmWebSocket {
     fn drop(&mut self) {
-        LAYER8_SOCKETS.with(|v| {
-            let mut val = v.take();
-            val.remove(self.url.as_str());
-            v.set(val);
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            val.remove(&rebuild_url(&self.socket.url()));
         });
     }
 }
 
-impl Default for WebSocket {
-    fn default() -> Self {
-        WebSocket {
-            url: String::new(),
-            onopen: JsValue::NULL,
-            onerror: JsValue::NULL,
-            onclose: JsValue::NULL,
-            onmessage: JsValue::NULL,
-        }
-    }
-}
-
-#[wasm_bindgen]
-impl WebSocket {
-    #[wasm_bindgen(constructor)] // change to JsError
-    pub async fn new(url: &str, proxy: &str) -> Result<Self, JsValue> {
-        // if already present, return the existing socket
-        let val = LAYER8_SOCKETS.with(|v| {
-            let val = v.take();
-            let url_ = rebuild_url(url);
-            if val.contains_key(&url_) {
-                v.set(val);
-                Some(WebSocket {
-                    url: url_.to_string(),
-                    ..Default::default()
-                })
+impl WasmWebSocket {
+    async fn init(options: InitConfig) -> Result<WasmWebSocketRef, JsValue> {
+        // if already present, return the existing socket ref
+        match LAYER8_SOCKETS.with_borrow(|val| {
+            if val.get(&rebuild_url(&options.url)).is_some() {
+                return Some(rebuild_url(&options.url));
             } else {
-                v.set(val);
                 None
             }
-        });
-
-        if let Some(val) = val {
-            return Ok(val);
+        }) {
+            Some(val) => return Ok(WasmWebSocketRef(val)),
+            None => {}
         }
 
         let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(KeyUse::Ecdh)?;
@@ -85,190 +68,364 @@ impl WebSocket {
         });
 
         let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
-        let proxy = format!("{proxy}/init-tunnel?backend={url}");
+        let proxy = format!("{}/init-tunnel?backend={}", options.proxy, options.url);
 
-        let (mut socket, _) = connect(proxy).expect("Can't connect to port");
+        console_log!(&format!("Connecting to proxy: {}", proxy));
 
-        socket
-            .send(Message::Text(Utf8Bytes::from(b64_pub_jwk)))
-            .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let socket = BrowserWebSocket::new(&proxy).map_err(|e| {
+            console_log!(&format!("Failed to connect to proxy: {:?}", e));
+            JsValue::from_str("Failed to connect to proxy")
+        })?;
+
+        console_log!(&format!("Connected to proxy: {}", proxy));
+
+        socket.send_with_str(&b64_pub_jwk).map_err(|e| {
+            console_log!(&format!("Failed to send public key: {:?}", e));
+            JsValue::from_str("Failed to send public key")
+        })?;
 
         // we expect the response to be a binary message
-        let resp = socket.read().map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let resp_bytes = {
+            let (tx, rx) = std::sync::mpsc::channel();
 
-        let resp_bytes = match resp {
-            Message::Binary(data) => data,
-            _ => {
-                ENCRYPTED_TUNNEL_FLAG.set(false);
-                return Err(JsValue::from_str("The response from the proxy is not binary."));
+            let closure = {
+                let tx = tx.clone();
+                let closure = Closure::once(move |data: MessageEvent| {
+                    let mut resp_ = Vec::new();
+                    let data = Uint8Array::new(&data);
+                    resp_.extend(data.to_vec());
+                    tx.send(resp_).unwrap();
+                });
+
+                closure.into_js_value()
+            };
+
+            socket.set_onmessage(Some(&Function::from(closure)));
+
+            // this will be a blocking operation; we need to wait for the response
+            rx.recv().map_err(|e| JsValue::from_str(&format!("{}", e)))?
+        };
+
+        let mut proxy_data = {
+            let envelope = Layer8Envelope::from_json_bytes(&resp_bytes).map_err(|e| {
+                console_log!(&format!(
+                    "Failed to decode response: {}, Data is :{}",
+                    e,
+                    String::from_utf8_lossy(resp_bytes.as_ref())
+                ));
+
+                JsValue::from_str("Failed to decode response")
+            })?;
+
+            match envelope {
+                Layer8Envelope::Raw(raw) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&raw).map_err(|e| {
+                    console_log!(&format!(
+                        "Failed to decode response: {}, Data is :{}",
+                        e,
+                        String::from_utf8_lossy(resp_bytes.as_ref())
+                    ));
+
+                    JsValue::from_str("Failed to decode response")
+                })?,
+                _ => {
+                    return Err(JsValue::from_str("Expected raw response"));
+                }
             }
         };
 
-        let mut proxy_data: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&resp_bytes.as_ref()).map_err(|val| {
-            console_log!(&format!(
-                "Failed to decode response: {}, Data is :{}",
-                val,
-                String::from_utf8_lossy(resp_bytes.as_ref())
-            ));
-
-            JsValue::from_str("Failed to decode response")
-        })?;
-
-        UP_JWT.set(
-            proxy_data
-                .remove("up-JWT")
-                .ok_or("up_jwt not found")?
-                .as_str()
-                .unwrap() // infalliable
-                .to_string(),
-        );
+        UP_JWT.set(proxy_data.remove("up-JWT").ok_or("up_jwt not found")?.as_str().unwrap().to_string());
 
         let shared_key = private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?;
-        socket.set_shared_secret(shared_key.clone());
-        USER_SYMMETRIC_KEY.set(Some(shared_key));
+        USER_SYMMETRIC_KEY.set(Some(shared_key.clone()));
         ENCRYPTED_TUNNEL_FLAG.set(true);
 
-        LAYER8_SOCKETS.with(|v| {
-            let mut val = v.take();
-            val.insert(rebuild_url(url), socket);
-            v.set(val);
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            val.insert(rebuild_url(&options.url), WasmWebSocket { socket });
         });
 
-        Ok(WebSocket {
-            url: url.to_string(),
-            ..Default::default()
+        Ok(WasmWebSocketRef(rebuild_url(&options.url)))
+    }
+}
+
+// This block implements the browser APIs for the WebAssembly interop.
+#[wasm_bindgen(js_class = L8WebSocket)]
+impl WasmWebSocketRef {
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `url` field of this object.
+    pub fn url(&self) -> String {
+        self.0.clone()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `readyState` field of this object.
+    pub fn ready_state(&self) -> u16 {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.ready_state()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `bufferedAmount` field of this object.
+    pub fn buffered_amount(&self) -> u32 {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.buffered_amount()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `onopen` field of this object.
+    pub fn onopen(&self) -> Option<Function> {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.onopen()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = onopen, setter)]
+    /// Setter for the `onopen` field of this object.
+    pub fn set_onopen(&self, value: Option<Function>) {
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            if let Some(stream) = val.get_mut(&self.0) {
+                stream.socket.set_onopen(value.as_ref());
+            }
+        });
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `onerror` field of this object.
+    pub fn onerror(&self) -> Option<Function> {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.onerror()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = onerror, setter)]
+    /// Setter for the `onerror` field of this object.
+    pub fn set_onerror(&self, value: Option<Function>) {
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            if let Some(stream) = val.get_mut(&self.0) {
+                stream.socket.set_onerror(value.as_ref());
+            }
+        });
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `onclose` field of this object.
+    pub fn onclose(&self) -> Option<Function> {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.onclose()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = onclose, setter)]
+    /// Setter for the `onclose` field of this object.
+    pub fn set_onclose(&self, value: Option<Function>) {
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            if let Some(stream) = val.get_mut(&self.0) {
+                stream.socket.set_onclose(value.as_ref());
+            }
+        });
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `extensions` field of this object.
+    pub fn extensions(&self) -> String {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.extensions()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `protocol` field of this object.
+    pub fn protocol(&self) -> String {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.protocol()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(getter)]
+    /// Getter for the `binaryType` field of this object.
+    pub fn onmessage(&self) -> Option<Function> {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.onmessage()))
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = onmessage, setter)]
+    /// Setter for the `binaryType` field of this object.
+    pub fn set_onmessage(&self, value: Option<Function>) {
+        // self.on_receive(value);
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            if let Some(stream) = val.get_mut(&self.0) {
+                // we need yo overwrite the on
+                stream.socket.set_onmessage(Some(&preprocess_on_message(value)));
+            }
+        });
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = addEventListener)]
+    /// Sets an event listener on the WebSocket object.
+    /// It intercepts the `message` event and plugs in our custom logic to decrypt the message.
+    pub fn add_event_listener(&self, type_: &str, listener: Option<Function>) {
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            let stream = val.get_mut(&self.0).expect_throw(&format!("Socket with url {} not found", self.0));
+            if type_.eq_ignore_ascii_case("message") {
+                stream.socket.set_onmessage(Some(&preprocess_on_message(listener)));
+                return;
+            }
+
+            if let Some(listener) = &listener {
+                stream
+                    .socket
+                    .add_event_listener_with_callback(type_, listener)
+                    .expect_throw(&format!("Failed to add event listener for type: {}", type_))
+            }
+        });
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = binaryType, getter)]
+    /// Getter for the `binaryType` field of this object.
+    pub fn binary_type(&self) -> BinaryType {
+        LAYER8_SOCKETS
+            .with_borrow(|val| val.get(&self.0).map(|val| val.socket.binary_type()))
+            .unwrap_or(BinaryType::Arraybuffer)
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    #[wasm_bindgen(js_name = binaryType, setter)]
+    /// Setter for the `binaryType` field of this object.
+    /// This is a no-op since we layer8 dictates the binary type.
+    pub fn set_binary_type(&self, _: BinaryType) {}
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    /// Constructor for the `WebSocket` object.
+    #[wasm_bindgen(constructor)]
+    pub async fn new(options: InitConfig) -> Result<Self, JsValue> {
+        if options.url.is_empty() {
+            return Err(JsValue::from_str("url is required."));
+        }
+
+        if options.proxy.is_empty() {
+            return Err(JsValue::from_str("proxy_url is required."));
+        }
+
+        WasmWebSocket::init(options).await
+    }
+
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    /// close the connection
+    pub fn close(&self, code: Option<u16>, reason: Option<String>) -> Result<(), JsValue> {
+        LAYER8_SOCKETS.with_borrow_mut(|val| {
+            if let Some(val) = val.get_mut(&self.0) {
+                if code.is_some() && reason.is_some() {
+                    val.socket.close_with_code_and_reason(code.unwrap(), &reason.unwrap())
+                } else if code.is_some() {
+                    val.socket.close_with_code(code.unwrap())
+                } else {
+                    val.socket.close()
+                }
+            } else {
+                Err(JsValue::from_str("Socket not found"))
+            }
         })
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn url(&self) -> String {
-        self.url.clone()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn ready_state(&self) -> u16 {
-        return 1; //todo
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn buffered_amount(&self) -> u32 {
-        return 0; // todo
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn onopen(&self) -> Option<Function> {
-        self.onopen.clone()
-    }
-
-    #[wasm_bindgen(setter)]
-    pub fn set_onopen(&mut self, value: Option<Function>) {
-        self.onopen = value;
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn onerror(&self) -> Option<Function> {
-        self.onerror.clone()
-    }
-
-    #[wasm_bindgen(setter)]
-    pub fn set_onerror(&mut self, value: Option<Function>) {
-        self.onerror = value;
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn onclose(&self) -> Option<Function> {
-        self.onclose.clone()
-    }
-
-    #[wasm_bindgen(setter)]
-    pub fn set_onclose(&mut self, value: Option<Function>) {
-        self.onclose = value;
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn extensions(&self) -> String {
-        return String::new(); // todo
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn protocol(&self) -> String {
-        return String::new(); // todo
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn onmessage(&self) -> Option<Function> {
-        self.onmessage.clone()
-    }
-
-    #[wasm_bindgen(setter)]
-    pub fn set_onmessage(&mut self, value: Option<Function>) {
-        self.onmessage = value;
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn binary_type(&self) -> BinaryType {
-        BinaryType::Arraybuffer // TODO
-    }
-
-    #[wasm_bindgen(setter)]
-    pub fn set_binary_type(&self, _value: BinaryType) {
-        // TODO
-    }
-
-    pub fn close(&self) -> Result<(), JsValue> {
-        // self.0.close()
-        Ok(())
-    }
-
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     pub fn send(&self, data: JsValue) -> Result<(), JsValue> {
-        console_log!(format!("Sending data: {:?}", data));
-        let socket = LAYER8_SOCKETS.with(|v| {
-            let val = v.take();
-            let val = val.get_mut(self.url.as_str()).ok_or("Socket not found").map_err(|e| {
-                v.set(val);
-                JsValue::from_str(e)
-            });
-            val
-        })?;
-
+        console_log!(&format!("Sending data: {:?}", data));
         let reader = FileReaderSync::new()?;
 
+        let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
+            Some(v) => v,
+            None => return Err(JsValue::from_str("Symmetric key not found")),
+        };
+
+        let metadata = serde_json::to_vec(&WebSocketMetadata {
+            backend_url: self.0.to_string(),
+        })
+        .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+
+        let mut ws_exchange = WebSocketPayload {
+            payload: "".to_string(),
+            metadata: metadata,
+        };
+
+        // Types checked: string, Blob, ArrayBuffer, Uint8Array
         if data.is_string() {
-            let msg = Message::Text(Utf8Bytes::from(data.as_string().unwrap()));
-            socket.send(msg).map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-
-            LAYER8_SOCKETS.with(|v| {
-                let mut val = v.take();
-                val.insert(self.url.clone(), *socket);
-                v.set(val);
-            });
-            Ok(())
+            let encrypted = symmetric_key.symmetric_encrypt(data.as_string().unwrap().as_bytes())?;
+            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
         } else if data.is_instance_of::<Blob>() {
-            let val = reader
-                .read_as_binary_string(&data.dyn_into::<Blob>().expect("check already done; qed"))?
-                .as_bytes();
+            let data = {
+                let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
+                Uint8Array::new(&array).to_vec()
+            };
 
-            socket
-                .send(Message::Binary(Bytes::from(val)))
-                .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+        } else if data.is_instance_of::<ArrayBuffer>() {
+            let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
 
-            Ok(())
-        // } else if data.is_instance_of::<ArrayBuffer>() {
-        //     let data = ArrayBuffer::from(data);
-
-        //     let data = data.dyn_into::<ArrayBuffer>().expect("check already done; qed")?;
-
-        //     let val = reader.read_as_binary_string()?;
-        //     self.0.send_with_array_buffer(data.unchecked_ref())
-        // } else if data.is_object() {
-        //     self.0.send_with_array_buffer_view(&Object::from(data.clone()))
-        // } else if data.is_instance_of::<Uint8Array>() {
-        //     self.0
-        //         .send_with_u8_array(&data.clone().dyn_into::<Uint8Array>().expect("check already done; qed").to_vec())
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+        } else if data.is_instance_of::<Uint8Array>() {
+            let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
         } else {
-            Err(JsValue::from_str("Unsupported data type"))
+            return Err(JsValue::from_str("Unsupported data type"));
         }
+
+        LAYER8_SOCKETS.with_borrow_mut(|v| {
+            let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
+            let data = serde_json::to_vec(&ws_exchange).map_err(|e| format!("{}", e.to_string()))?;
+            ws.socket.send_with_u8_array(&data)
+        })
     }
+}
+
+// this block decrypts the incoming message before passing it to the client.
+fn preprocess_on_message(pipeline: Option<Function>) -> Function {
+    let decrypt_callback = Closure::wrap(Box::new(move |data: MessageEvent| {
+        let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
+            Some(v) => v,
+            None => {
+                console_log!("Symmetric key not found");
+                return;
+            }
+        };
+
+        let data = {
+            let data = serde_json::from_slice::<WebSocketPayload>(&Uint8Array::new(&data).to_vec()).expect_throw("Failed to parse WebSocketPayload");
+
+            let data = symmetric_key
+                .symmetric_decrypt(&base64_enc_dec.decode(&data.payload).expect_throw("Failed to decode base64 payload"))
+                .unwrap();
+            let data = String::from_utf8(data).unwrap();
+            data
+        };
+
+        let data = serde_json::from_str::<WebSocketPayload>(&data).unwrap();
+        let data = data.payload;
+
+        let data = JsValue::from_str(&data);
+        pipeline.as_ref().map(|pipeline| pipeline.call1(&JsValue::NULL, &data).unwrap());
+    }) as Box<dyn FnMut(MessageEvent)>);
+
+    decrypt_callback.into_js_value().dyn_into().unwrap()
 }
 
 // TODO: map API 1:1 from socket.io

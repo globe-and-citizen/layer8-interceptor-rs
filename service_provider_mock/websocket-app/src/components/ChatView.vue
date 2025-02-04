@@ -22,7 +22,7 @@ export default {
     };
   },
   mounted() {
-    this.socket = new WebSocket('ws://localhost:9086');
+    this.socket = new WebSocket('ws://localhost:9086','ws://localhost:5001');
 
     this.socket.onmessage = (event) => {
       this.messages.push({ text: event.data, id: Math.random() });

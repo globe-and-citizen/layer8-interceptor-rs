@@ -40,8 +40,8 @@ reqwest = "0.12.7"
 js-sys = "0.3.70"
 serde-wasm-bindgen = "0.6.5"
 uuid = { version = "1", features = ["js"] }
-layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "main" }
-layer8-tungstenite = { git = "https://github.com/globe-and-citizen/layer8-tungstenite.git", branch = "master" }
+layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "add/websocket-data-wrapper" } # TODO: point to crate version once published
+# layer8-tungstenite = { git = "https://github.com/globe-and-citizen/layer8-tungstenite.git", branch = "chore/rework-stream" } # TODO: point to crate version once published
 
 [features]
 default = ["experimental"]
@@ -51,4 +51,5 @@ websocket = [
     "web-sys/BinaryType",
     "web-sys/Blob",
     "web-sys/FileReaderSync",
+    "web-sys/WebSocket",
 ]

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::{cell::Cell, collections::HashMap};
 
 use js_sys::{Array, Object, Uint8Array};
@@ -10,11 +11,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{File, FormData, Response, ResponseInit};
 
-use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map, Jwk};
+use layer8_primitives::crypto::{self, generate_key_pair, jwk_from_map};
 use layer8_primitives::types::{self, new_client};
-
-// #[cfg(feature = "websocket")]
-use layer8_tungstenite::{accept, connect, Message};
 
 use crate::js_glue::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
@@ -27,7 +25,7 @@ const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in millisec
 
 thread_local! {
     pub(crate) static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    pub(crate) static USER_SYMMETRIC_KEY: Cell<Option<crypto::Jwk> >= const { Cell::new(None) };
+    pub(crate) static USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
     pub(crate) static UP_JWT: Cell<String> = Cell::new("".to_string());
     pub(crate) static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
 

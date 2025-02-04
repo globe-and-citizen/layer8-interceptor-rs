@@ -22,11 +22,15 @@ make build-experimental
 To use websockets, we can use our library as so
 
 ```js
-import { websocket_init } from 'layer8-interceptor-rs'
+import { WebSocket } from 'layer8-interceptor-rs'
 
 // code here...
 mounted() {
-    this.socket = websocket_init(new WebSocket('ws://localhost:9086', 'some-protocol'));
+    this.socket = new WebSocket({
+      url: 'ws://localhost:9086', 
+      proxy: 'http://proxy.com',
+      protocol: 'some-protocol',
+    });
 
     this.socket.onmessage = (event) => {
       this.messages.push({ text: event.data, id: Math.random() });
