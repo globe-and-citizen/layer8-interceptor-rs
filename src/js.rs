@@ -671,7 +671,8 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
         console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
     }
 
-    Ok(console_log!(&format!("Encrypted tunnel established with providers: {:?}", providers)))
+    console_log!(&format!("Encrypted tunnel established with providers: {:?}", providers));
+    Ok(())
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
@@ -755,7 +756,8 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         v.replace(map);
     });
 
-    Ok(console_log!(&format!("Encrypted tunnel established with provider: {}", provider)))
+    console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
+    Ok(())
 }
 
 pub(crate) fn rebuild_url(url: &str) -> String {

@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{ArrayBuffer, Function, Uint8Array};
 use std::{cell::RefCell, collections::HashMap};
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Blob, FileReaderSync, MessageEvent, WebSocket as BrowserWebSocket};
+use web_sys::{BinaryType, Blob, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
     crypto::{generate_key_pair, jwk_from_map, KeyUse},
@@ -51,15 +51,14 @@ impl Drop for WasmWebSocket {
 impl WasmWebSocket {
     async fn init(options: InitConfig) -> Result<WasmWebSocketRef, JsValue> {
         // if already present, return the existing socket ref
-        match LAYER8_SOCKETS.with_borrow(|val| {
+        if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| {
             if val.get(&rebuild_url(&options.url)).is_some() {
-                return Some(rebuild_url(&options.url));
+                Some(rebuild_url(&options.url))
             } else {
                 None
             }
         }) {
-            Some(val) => return Ok(WasmWebSocketRef(val)),
-            None => {}
+            return Ok(WasmWebSocketRef(val));
         }
 
         let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(KeyUse::Ecdh)?;
@@ -92,7 +91,7 @@ impl WasmWebSocket {
                 let tx = tx.clone();
                 let closure = Closure::once(move |data: MessageEvent| {
                     let mut resp_ = Vec::new();
-                    let data = Uint8Array::new(&data);
+                    let data = Uint8Array::new(&data.data());
                     resp_.extend(data.to_vec());
                     tx.send(resp_).unwrap();
                 });
@@ -331,12 +330,10 @@ impl WasmWebSocketRef {
     pub fn close(&self, code: Option<u16>, reason: Option<String>) -> Result<(), JsValue> {
         LAYER8_SOCKETS.with_borrow_mut(|val| {
             if let Some(val) = val.get_mut(&self.0) {
-                if code.is_some() && reason.is_some() {
-                    val.socket.close_with_code_and_reason(code.unwrap(), &reason.unwrap())
-                } else if code.is_some() {
-                    val.socket.close_with_code(code.unwrap())
-                } else {
-                    val.socket.close()
+                match (code, reason) {
+                    (Some(code), Some(reason)) => val.socket.close_with_code_and_reason(code, &reason),
+                    (Some(code), None) => val.socket.close_with_code(code),
+                    _ => val.socket.close(),
                 }
             } else {
                 Err(JsValue::from_str("Socket not found"))
@@ -361,7 +358,7 @@ impl WasmWebSocketRef {
 
         let mut ws_exchange = WebSocketPayload {
             payload: "".to_string(),
-            metadata: metadata,
+            metadata,
         };
 
         // Types checked: string, Blob, ArrayBuffer, Uint8Array
@@ -391,7 +388,7 @@ impl WasmWebSocketRef {
 
         LAYER8_SOCKETS.with_borrow_mut(|v| {
             let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
-            let data = serde_json::to_vec(&ws_exchange).map_err(|e| format!("{}", e.to_string()))?;
+            let data = serde_json::to_vec(&ws_exchange).map_err(|e| e.to_string())?;
             ws.socket.send_with_u8_array(&data)
         })
     }
@@ -399,7 +396,7 @@ impl WasmWebSocketRef {
 
 // this block decrypts the incoming message before passing it to the client.
 fn preprocess_on_message(pipeline: Option<Function>) -> Function {
-    let decrypt_callback = Closure::wrap(Box::new(move |data: MessageEvent| {
+    let decrypt_callback = Closure::wrap(Box::new(move |message: MessageEvent| {
         let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,
             None => {
@@ -408,21 +405,25 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
             }
         };
 
-        let data = {
-            let data = serde_json::from_slice::<WebSocketPayload>(&Uint8Array::new(&data).to_vec()).expect_throw("Failed to parse WebSocketPayload");
+        let data: JsValue = {
+            let payload = serde_json::from_slice::<WebSocketPayload>(&Uint8Array::new(&message.data()).to_vec())
+                .expect_throw("Failed to parse WebSocketPayload")
+                .payload;
 
-            let data = symmetric_key
-                .symmetric_decrypt(&base64_enc_dec.decode(&data.payload).expect_throw("Failed to decode base64 payload"))
+            let slice = symmetric_key
+                .symmetric_decrypt(&base64_enc_dec.decode(&payload).expect_throw("Failed to decode base64 payload"))
                 .unwrap();
-            let data = String::from_utf8(data).unwrap();
-            data
+
+            Uint8Array::from(slice.as_slice()).into()
         };
 
-        let data = serde_json::from_str::<WebSocketPayload>(&data).unwrap();
-        let data = data.payload;
+        let msg_event = {
+            let msg_init = MessageEventInit::new();
+            msg_init.set_data(&data);
+            MessageEvent::new_with_event_init_dict("message", &msg_init).expect_throw("Failed to create MessageEventInit")
+        };
 
-        let data = JsValue::from_str(&data);
-        pipeline.as_ref().map(|pipeline| pipeline.call1(&JsValue::NULL, &data).unwrap());
+        pipeline.as_ref().map(|pipeline| pipeline.call1(&JsValue::NULL, &msg_event).unwrap());
     }) as Box<dyn FnMut(MessageEvent)>);
 
     decrypt_callback.into_js_value().dyn_into().unwrap()
