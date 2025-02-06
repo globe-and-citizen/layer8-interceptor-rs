@@ -719,6 +719,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "tokio",
  "url",
  "uuid",
  "wasm-bindgen",

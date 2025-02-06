@@ -1,8 +1,9 @@
 use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{ArrayBuffer, Function, Uint8Array};
 use std::{cell::RefCell, collections::HashMap};
+use tokio::sync::oneshot;
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Blob, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
+use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
     crypto::{generate_key_pair, jwk_from_map, KeyUse},
@@ -21,10 +22,70 @@ thread_local! {
 
 /// The configuration object for the WebSocket.
 #[wasm_bindgen(getter_with_clone)]
+#[derive(Debug, Default)]
 pub struct InitConfig {
     pub url: String,
     pub proxy: String,
     pub protocols: Option<Vec<String>>,
+}
+
+impl InitConfig {
+    fn new(obj: js_sys::Object) -> Result<Self, JsError> {
+        let mut init_config = InitConfig::default();
+        let entries = object_entries(&obj);
+        for entry in entries.iter() {
+            let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
+            match val.get(0).as_string().ok_or(JsError::new("expected object key to be a string"))?.as_str() {
+                "url" => {
+                    init_config.url = val
+                        .get(1)
+                        .as_string()
+                        .ok_or(JsError::new("expected `InitConfig.url` value to be a string"))?;
+                }
+
+                "proxy" => {
+                    init_config.proxy = val
+                        .get(1)
+                        .as_string()
+                        .ok_or(JsError::new("expected `InitConfig.proxy` value to be a string"))?;
+                }
+
+                "protocols" => {
+                    if val.get(1).is_instance_of::<js_sys::Array>() {
+                        let protocols = js_sys::Array::from(&val.get(1));
+                        let mut protocol_list = Vec::new();
+                        for protocol in protocols.iter() {
+                            protocol_list.push(
+                                protocol
+                                    .as_string()
+                                    .ok_or(JsError::new("expected `InitConfig.protocols` value to be a string"))?,
+                            );
+                        }
+                        init_config.protocols = Some(protocol_list);
+                    } else if val.get(1).is_string() {
+                        let protocols = val
+                            .get(1)
+                            .as_string()
+                            .ok_or(JsError::new("expected `InitConfig.protocols` value to be a string"))?;
+
+                        init_config.protocols = Some(vec![protocols]);
+                    } else {
+                        return Err(JsError::new("expected `InitConfig.protocols` value to be a string or an array"));
+                    }
+                }
+
+                _ => {
+                    // we rather pipe the issues now than have them silently ignored
+                    return Err(JsError::new(&format!(
+                        "unexpected key in `InitConfig`: {}",
+                        val.get(0).as_string().expect_throw("expected object key to be a string")
+                    )));
+                }
+            }
+        }
+
+        Ok(init_config)
+    }
 }
 
 // The WebSocket input-output stream using the browser's WebSocket API.
@@ -42,6 +103,7 @@ struct WasmWebSocketRef(String);
 
 impl Drop for WasmWebSocket {
     fn drop(&mut self) {
+        console_log!("Dropping WebSocketRef");
         LAYER8_SOCKETS.with_borrow_mut(|val| {
             val.remove(&rebuild_url(&self.socket.url()));
         });
@@ -49,7 +111,9 @@ impl Drop for WasmWebSocket {
 }
 
 impl WasmWebSocket {
-    async fn init(options: InitConfig) -> Result<WasmWebSocketRef, JsValue> {
+    async fn init_(options: js_sys::Object) -> Result<WasmWebSocketRef, JsValue> {
+        let options = InitConfig::new(options)?;
+
         // if already present, return the existing socket ref
         if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| {
             if val.get(&rebuild_url(&options.url)).is_some() {
@@ -71,45 +135,75 @@ impl WasmWebSocket {
 
         console_log!(&format!("Connecting to proxy: {}", proxy));
 
-        let socket = BrowserWebSocket::new(&proxy).map_err(|e| {
-            console_log!(&format!("Failed to connect to proxy: {:?}", e));
+        let socket = BrowserWebSocket::new(&proxy).map_err(|_e| {
+            console_log!(&format!("Failed to connect to proxy: {:?}", _e));
             JsValue::from_str("Failed to connect to proxy")
         })?;
 
-        console_log!(&format!("Connected to proxy: {}", proxy));
+        // waiting for the connection to be ready
+        {
+            let (tx, rx) = oneshot::channel();
+            let closure = Closure::once(move |_event: Event| {
+                console_log!("Connected to proxy");
+                tx.send(())
+                    .expect_throw("Failed to send ready state; this is a bug in the code, please report it to the developers")
+            });
 
-        socket.send_with_str(&b64_pub_jwk).map_err(|e| {
-            console_log!(&format!("Failed to send public key: {:?}", e));
-            JsValue::from_str("Failed to send public key")
-        })?;
+            socket.set_onopen(Some(closure.as_ref().unchecked_ref()));
 
-        // we expect the response to be a binary message
+            rx.await.map_err(|_e| {
+                console_log!("Failed to connect to proxy");
+                JsValue::from_str("Failed to connect to proxy")
+            })?;
+
+            console_log!("Connected to proxy");
+            socket.set_onopen(None);
+        }
+
+        // let's make the initECDH handshake first
         let resp_bytes = {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = oneshot::channel();
+            let closure = Closure::once(move |event: MessageEvent| {
+                let mut resp_ = Vec::new();
+                let data = Uint8Array::new(&event.data());
+                resp_.extend(data.to_vec());
+                tx.send(resp_).unwrap();
+            });
 
-            let closure = {
-                let tx = tx.clone();
-                let closure = Closure::once(move |data: MessageEvent| {
-                    let mut resp_ = Vec::new();
-                    let data = Uint8Array::new(&data.data());
-                    resp_.extend(data.to_vec());
-                    tx.send(resp_).unwrap();
-                });
+            console_log!("Setting onmessage");
+            socket.set_onmessage(Some(closure.as_ref().unchecked_ref()));
 
-                closure.into_js_value()
-            };
+            // sending the public key
+            socket
+                .send_with_str(&b64_pub_jwk)
+                .map(|v| {
+                    console_log!(&format!("Sent public key: {}", b64_pub_jwk));
+                    v
+                })
+                .map_err(|_e| {
+                    console_log!(&format!("Failed to send public key: {:?}", _e));
+                    JsValue::from_str("Failed to send public key")
+                })?;
 
-            socket.set_onmessage(Some(&Function::from(closure)));
+            console_log!("Waiting for response");
 
             // this will be a blocking operation; we need to wait for the response
-            rx.recv().map_err(|e| JsValue::from_str(&format!("{}", e)))?
+            rx.await
+                .map(|v| {
+                    console_log_("Received response");
+                    socket.set_onmessage(None); // reset the onmessage callback
+                    v
+                })
+                .map_err(|e| JsValue::from_str(&e.to_string()))?
         };
 
+        console_log!("Decoding response");
+
         let mut proxy_data = {
-            let envelope = Layer8Envelope::from_json_bytes(&resp_bytes).map_err(|e| {
+            let envelope = Layer8Envelope::from_json_bytes(&resp_bytes).map_err(|_e| {
                 console_log!(&format!(
                     "Failed to decode response: {}, Data is :{}",
-                    e,
+                    _e,
                     String::from_utf8_lossy(resp_bytes.as_ref())
                 ));
 
@@ -117,10 +211,10 @@ impl WasmWebSocket {
             })?;
 
             match envelope {
-                Layer8Envelope::Raw(raw) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&raw).map_err(|e| {
+                Layer8Envelope::Raw(raw) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&raw).map_err(|_e| {
                     console_log!(&format!(
                         "Failed to decode response: {}, Data is :{}",
-                        e,
+                        _e,
                         String::from_utf8_lossy(resp_bytes.as_ref())
                     ));
 
@@ -310,23 +404,32 @@ impl WasmWebSocketRef {
     /// This is a no-op since we layer8 dictates the binary type.
     pub fn set_binary_type(&self, _: BinaryType) {}
 
-    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     /// Constructor for the `WebSocket` object.
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     #[wasm_bindgen(constructor)]
-    pub async fn new(options: InitConfig) -> Result<Self, JsValue> {
-        if options.url.is_empty() {
-            return Err(JsValue::from_str("url is required."));
-        }
-
-        if options.proxy.is_empty() {
-            return Err(JsValue::from_str("proxy_url is required."));
-        }
-
-        WasmWebSocket::init(options).await
+    pub fn new() -> Self {
+        WasmWebSocketRef("".to_string())
     }
 
-    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
+    /// The options object is expected to have the following structure:
+    /// ```js
+    /// export interface InitConfig {
+    ///     // The URL of the service provider.
+    ///     url: string;
+    ///     // The Layer8 proxy URL to connect to.
+    ///     proxy: string;
+    ///     // The protocols to use for the ws connection.
+    ///     protocols?: string | string[] | undefined;
+    /// }
+    /// ```
+    #[allow(dead_code)]
+    pub async fn init(&mut self, options: js_sys::Object) -> Result<(), JsValue> {
+        *self = WasmWebSocket::init_(options).await?;
+        Ok(())
+    }
+
     /// close the connection
+    #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     pub fn close(&self, code: Option<u16>, reason: Option<String>) -> Result<(), JsValue> {
         LAYER8_SOCKETS.with_borrow_mut(|val| {
             if let Some(val) = val.get_mut(&self.0) {

@@ -18,6 +18,7 @@ use crate::js_glue::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 
+#[cfg(debug_assertions)]
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
@@ -608,21 +609,15 @@ pub async fn persistence_check() -> i32 {
 /// ```js
 /// export interface InitConfig {
 ///    // The list of providers to establish the encrypted tunnel with.
-///    // Deprecated: `provider` is used for backwards compatibility, use `provider_protocols` instead.
-///    providers:   string[];
+///    providers: string[];
 ///    // The proxy URL to establish the encrypted tunnel.
-///    proxy:       string;
+///    proxy: string;
 ///    // Deprecated: `staticPath` is used for backwards compatibility, use `staticPaths` instead.
-///    staticPath:  string;
+///    staticPath: string | undefined;
 ///    // The list of paths to serve static assets from.
-///    staticPaths: string[];
-///    // The protocol for the providers to use. The first element is the protocol name, the second is the protocol version.
-///    // If using a supported protocol, say websockets, provide as [['http://example.com', 'ws']].
-///    // If not using a custom protocol, provide as [['http://example.com', 'http']].
-///    // Supported protocols include: ws, http. Note: websockets requires experimental support enabled for the layer8 components.
-///    provider_protocols: [string, string][];
+///    staticPaths: string[] | undefined;
 ///    // The maximum size of assets to cache. The value is in MB.
-///    cacheAssetLimit?: number;
+///    cacheAssetLimit: number | undefined;
 /// }
 /// ```
 #[allow(non_snake_case)]
@@ -644,28 +639,12 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
     clear_expired_cache(INDEXED_DB_CACHE, cache);
 
     let mut providers = Vec::new();
-    for (provider, protocol) in init_config.provider_protocols.iter() {
+    for provider in init_config.providers.iter() {
         console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
-
-        match protocol.as_str() {
-            "http" => {
-                init_tunnel(provider, &init_config.proxy).await.map_err(|e| {
-                    console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
-                    JsError::new(&e)
-                })?;
-            }
-            // fixme
-            // "websocket" => {
-            //     init_tunnel_websocket(provider, &init_config.proxy).await.map_err(|e| {
-            //         console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
-            //         JsError::new(&e)
-            //     })?;
-            // }
-            _ => {
-                console_error!(&format!("Unsupported protocol: {}", protocol));
-                return Err(JsError::new(&format!("Unsupported protocol: {}", protocol)));
-            }
-        }
+        init_tunnel(provider, &init_config.proxy).await.map_err(|e| {
+            console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+            JsError::new(&e)
+        })?;
 
         providers.push(provider);
         console_log!(&format!("Encrypted tunnel established with provider: {}", provider));

@@ -7,9 +7,12 @@ const wsServer = new wss.Server({ server });
 app.use(express.static('public'));
 
 function broadcast(msg) {
-    console.log(msg);
+    console.log('echoing back the received msg');
     wsServer.clients.forEach(function each(client) {
-        client.send(msg.toString());
+        client.send(msg, (err) => {
+            if (err != null || err != undefined)
+                console.error("Logged an error on broadcast: ", err)
+        });
     });
 };
 

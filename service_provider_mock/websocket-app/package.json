@@ -10,13 +10,13 @@
   },
   "dependencies": {
     "vue": "^3.2.13",
-    "layer8-interceptor-rs": "../../../layer8-interceptor-rs/pkg",
+    "layer8-interceptor-rs": "file:../../pkg",
     "vite-plugin-top-level-await": "^1.4.4",
     "vite-plugin-wasm": "^3.3.0",
     "vue-router": "^4.2.5"
   },
   "devDependencies": {
-    "vite": "^4.5.3",
-    "@vitejs/plugin-vue": "^4.6.2"
+    "@vitejs/plugin-vue": "^4.6.2",
+    "vite": "^4.5.3"
   }
 }

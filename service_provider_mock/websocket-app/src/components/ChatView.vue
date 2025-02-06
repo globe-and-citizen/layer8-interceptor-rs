@@ -11,7 +11,7 @@
 </template>
 
 <script>
-import { WebSocket } from 'layer8-interceptor-rs';
+import { L8WebSocket } from 'layer8-interceptor-rs';
 
 export default {
   name: 'ChatView',
@@ -21,8 +21,20 @@ export default {
       messages: [],
     };
   },
-  mounted() {
-    this.socket = new WebSocket('ws://localhost:9086','ws://localhost:5001');
+  async mounted() {
+    try {
+      this.socket = new L8WebSocket();
+      await this.socket.init({  
+        proxy: 'ws://localhost:9086',
+        url: 'ws://localhost:5001'
+      });
+
+      console.log('ws client is ready to use')
+    } catch (error) {
+      console.error(error);
+    }
+
+    console.log("check execution")
 
     this.socket.onmessage = (event) => {
       this.messages.push({ text: event.data, id: Math.random() });
