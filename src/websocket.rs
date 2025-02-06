@@ -174,11 +174,25 @@ impl WasmWebSocket {
             socket.set_onmessage(Some(closure.as_ref().unchecked_ref()));
 
             // sending the public key
+            let payload = Layer8Envelope::WebSocket(WebSocketPayload {
+                payload: b64_pub_jwk.clone(),
+                metadata: serde_json::to_vec(&WebSocketMetadata {
+                    backend_url: options.url.clone(),
+                })
+                .unwrap(),
+            });
+
             socket
-                .send_with_str(&b64_pub_jwk)
-                .map(|v| {
+                .send_with_u8_array(
+                    &serde_json::to_vec(&payload)
+                        .map_err(|_e| {
+                            console_log!(&format!("Failed to send public key: {:?}", _e));
+                            JsValue::from_str("Failed to send public key")
+                        })
+                        .unwrap(),
+                )
+                .inspect(|_| {
                     console_log!(&format!("Sent public key: {}", b64_pub_jwk));
-                    v
                 })
                 .map_err(|_e| {
                     console_log!(&format!("Failed to send public key: {:?}", _e));
@@ -189,10 +203,9 @@ impl WasmWebSocket {
 
             // this will be a blocking operation; we need to wait for the response
             rx.await
-                .map(|v| {
+                .inspect(|_| {
                     console_log_("Received response");
                     socket.set_onmessage(None); // reset the onmessage callback
-                    v
                 })
                 .map_err(|e| JsValue::from_str(&e.to_string()))?
         };
