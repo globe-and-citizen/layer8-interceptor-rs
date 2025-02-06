@@ -1,0 +1,14 @@
+{
+    "name": "websocket-app",
+    "version": "1.0.0",
+    "main": "server.js",
+    "scripts": {
+        "dev": "nodemon server.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "dependencies": {
+        "express": "^4.21.2",
+        "http": "^0.0.1-security",
+        "ws": "^8.18.0"
+    }
+}
