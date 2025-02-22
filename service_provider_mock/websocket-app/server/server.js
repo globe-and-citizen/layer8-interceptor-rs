@@ -4,6 +4,9 @@ const server = require('http').createServer(app);
 const wss = require('ws');
 const wsServer = new wss.Server({ server });
 
+require('dotenv').config()
+const port = process.env.PORT
+
 app.use(express.static('public'));
 
 function broadcast(msg) {
@@ -21,7 +24,8 @@ wsServer.on('connection', (ws) => {
 
     ws.on('message', (message) => {
         console.log(`Received message => ${message}`);
-        broadcast(message);
+        broadcast(message)
+        // broadcast("Hello, World!");
     });
 
     ws.on('close', () => {
@@ -29,6 +33,7 @@ wsServer.on('connection', (ws) => {
     });
 });
 
-server.listen(9086, () => {
-    console.log('Server listening on port 9086');
+server.listen(port, () => {
+    console.log(`Server listening on port: ${port}`);
 });
+

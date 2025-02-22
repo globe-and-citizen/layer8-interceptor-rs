@@ -13,6 +13,13 @@
 <script>
 import { L8WebSocket } from 'layer8-interceptor-rs';
 
+// todo
+// const BACKEND_URL =  import.meta.env.BACKEND_URL
+// const LAYER8_URL =  import.meta.env.LAYER8_URL
+
+const LAYER8_URL="http://localhost:5001"
+const BACKEND_URL="http://localhost:8000"
+
 export default {
   name: 'ChatView',
   data() {
@@ -24,10 +31,10 @@ export default {
   async mounted() {
     try {
       this.socket = new L8WebSocket();
-      await this.socket.init({  
-        proxy: 'ws://localhost:9086',
-        url: 'ws://localhost:5001'
-      });
+      await this.socket.init({
+        url: BACKEND_URL,
+        proxy: LAYER8_URL
+      }); // this is important to setup the handshake and
 
       console.log('ws client is ready to use')
     } catch (error) {

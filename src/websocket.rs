@@ -1,7 +1,9 @@
 use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{ArrayBuffer, Function, Uint8Array};
+use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
 use tokio::sync::oneshot;
+use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
@@ -11,7 +13,7 @@ use layer8_primitives::{
 };
 
 use crate::{
-    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PUB_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY},
+    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PRIVATE_JWK_ECDH, PUB_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY, UUID},
     js_imports_prelude::*,
 };
 
@@ -97,8 +99,10 @@ struct WasmWebSocket {
 
 /// This is a reference to the WebSocket object.
 /// The implementation does not support SharedArrayBuffers.
+///
+/// We would want to name it as `WebSocket`, please look: <https://github.com/rustwasm/wasm-bindgen/issues/2798>
 #[wasm_bindgen(js_name = L8WebSocket)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct WasmWebSocketRef(String);
 
 impl Drop for WasmWebSocket {
@@ -113,11 +117,12 @@ impl Drop for WasmWebSocket {
 impl WasmWebSocket {
     async fn init_(options: js_sys::Object) -> Result<WasmWebSocketRef, JsValue> {
         let options = InitConfig::new(options)?;
+        let rebuilt_url = rebuild_url(&options.url);
 
         // if already present, return the existing socket ref
         if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| {
-            if val.get(&rebuild_url(&options.url)).is_some() {
-                Some(rebuild_url(&options.url))
+            if val.get(&rebuilt_url).is_some() {
+                Some(rebuilt_url.clone())
             } else {
                 None
             }
@@ -126,16 +131,14 @@ impl WasmWebSocket {
         }
 
         let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(KeyUse::Ecdh)?;
-        PUB_JWK_ECDH.with(|v| {
+        PRIVATE_JWK_ECDH.with(|v| {
             v.set(Some(private_jwk_ecdh.clone()));
         });
 
         let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
-        let proxy = format!("{}/init-tunnel?backend={}", options.proxy, options.url);
+        console_log!(&format!("Connecting to proxy: {}", options.proxy));
 
-        console_log!(&format!("Connecting to proxy: {}", proxy));
-
-        let socket = BrowserWebSocket::new(&proxy).map_err(|_e| {
+        let socket = BrowserWebSocket::new(&options.proxy).map_err(|_e| {
             console_log!(&format!("Failed to connect to proxy: {:?}", _e));
             JsValue::from_str("Failed to connect to proxy")
         })?;
@@ -144,7 +147,6 @@ impl WasmWebSocket {
         {
             let (tx, rx) = oneshot::channel();
             let closure = Closure::once(move |_event: Event| {
-                console_log!("Connected to proxy");
                 tx.send(())
                     .expect_throw("Failed to send ready state; this is a bug in the code, please report it to the developers")
             });
@@ -164,22 +166,26 @@ impl WasmWebSocket {
         let resp_bytes = {
             let (tx, rx) = oneshot::channel();
             let closure = Closure::once(move |event: MessageEvent| {
-                let mut resp_ = Vec::new();
-                let data = Uint8Array::new(&event.data());
-                resp_.extend(data.to_vec());
-                tx.send(resp_).unwrap();
+                let data = event.data().as_string().expect_throw("expected the message frame o be a string");
+                console_log!(&format!("Received response: {}", data));
+                tx.send(data).unwrap();
             });
 
             console_log!("Setting onmessage");
             socket.set_onmessage(Some(closure.as_ref().unchecked_ref()));
 
+            // fixme: should be reusable for other operations
+            let uuid = Uuid::new_v4().to_string();
+            UUID.set(uuid.clone());
+
             // sending the public key
             let payload = Layer8Envelope::WebSocket(WebSocketPayload {
-                payload: b64_pub_jwk.clone(),
-                metadata: serde_json::to_vec(&WebSocketMetadata {
-                    backend_url: options.url.clone(),
-                })
-                .unwrap(),
+                payload: None,
+                metadata: json!({
+                    "backend_url": rebuilt_url,
+                    "x-ecdh-init": b64_pub_jwk,
+                    "x-client-uuid": uuid,
+                }),
             });
 
             socket
@@ -204,7 +210,7 @@ impl WasmWebSocket {
             // this will be a blocking operation; we need to wait for the response
             rx.await
                 .inspect(|_| {
-                    console_log_("Received response");
+                    console_log!("Received response");
                     socket.set_onmessage(None); // reset the onmessage callback
                 })
                 .map_err(|e| JsValue::from_str(&e.to_string()))?
@@ -213,10 +219,9 @@ impl WasmWebSocket {
         console_log!("Decoding response");
 
         let mut proxy_data = {
-            let envelope = Layer8Envelope::from_json_bytes(&resp_bytes).map_err(|_e| {
+            let envelope = Layer8Envelope::from_json_bytes(resp_bytes.as_bytes()).map_err(|e| {
                 console_log!(&format!(
-                    "Failed to decode response: {}, Data is :{}",
-                    _e,
+                    "Failed to decode response: {e}, Data is :{}",
                     String::from_utf8_lossy(resp_bytes.as_ref())
                 ));
 
@@ -224,17 +229,13 @@ impl WasmWebSocket {
             })?;
 
             match envelope {
-                Layer8Envelope::Raw(raw) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&raw).map_err(|_e| {
-                    console_log!(&format!(
-                        "Failed to decode response: {}, Data is :{}",
-                        _e,
-                        String::from_utf8_lossy(resp_bytes.as_ref())
-                    ));
-
-                    JsValue::from_str("Failed to decode response")
-                })?,
+                Layer8Envelope::WebSocket(payload) => {
+                    // we only care about the metadata to make sure the tunnel is secure
+                    serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(payload.metadata)
+                        .expect_throw("we expect a json object as the metadata")
+                }
                 _ => {
-                    return Err(JsValue::from_str("Expected raw response"));
+                    return Err(JsValue::from_str("we expect a websocket response"));
                 }
             }
         };
@@ -246,10 +247,10 @@ impl WasmWebSocket {
         ENCRYPTED_TUNNEL_FLAG.set(true);
 
         LAYER8_SOCKETS.with_borrow_mut(|val| {
-            val.insert(rebuild_url(&options.url), WasmWebSocket { socket });
+            val.insert(rebuilt_url.clone(), WasmWebSocket { socket });
         });
 
-        Ok(WasmWebSocketRef(rebuild_url(&options.url)))
+        Ok(WasmWebSocketRef(rebuilt_url))
     }
 }
 
@@ -421,7 +422,7 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        WasmWebSocketRef("".to_string())
+        WasmWebSocketRef::default()
     }
 
     /// The options object is expected to have the following structure:
@@ -467,20 +468,18 @@ impl WasmWebSocketRef {
             None => return Err(JsValue::from_str("Symmetric key not found")),
         };
 
-        let metadata = serde_json::to_vec(&WebSocketMetadata {
-            backend_url: self.0.to_string(),
-        })
-        .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-
         let mut ws_exchange = WebSocketPayload {
-            payload: "".to_string(),
-            metadata,
+            metadata: serde_json::to_value(&WebSocketMetadata {
+                backend_url: self.0.to_string(),
+            })
+            .expect_throw("the value is json serializable"),
+            payload: None,
         };
 
         // Types checked: string, Blob, ArrayBuffer, Uint8Array
         if data.is_string() {
             let encrypted = symmetric_key.symmetric_encrypt(data.as_string().unwrap().as_bytes())?;
-            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else if data.is_instance_of::<Blob>() {
             let data = {
                 let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
@@ -488,16 +487,16 @@ impl WasmWebSocketRef {
             };
 
             let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else if data.is_instance_of::<ArrayBuffer>() {
             let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
 
             let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else if data.is_instance_of::<Uint8Array>() {
             let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
             let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = base64_enc_dec.encode(&encrypted);
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else {
             return Err(JsValue::from_str("Unsupported data type"));
         }
@@ -527,7 +526,11 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
                 .payload;
 
             let slice = symmetric_key
-                .symmetric_decrypt(&base64_enc_dec.decode(&payload).expect_throw("Failed to decode base64 payload"))
+                .symmetric_decrypt(
+                    &base64_enc_dec
+                        .decode(&payload.expect_throw("we expect there to be a payload in the response"))
+                        .expect_throw("Failed to decode base64 payload"),
+                )
                 .unwrap();
 
             Uint8Array::from(slice.as_slice()).into()

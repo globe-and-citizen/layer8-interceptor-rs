@@ -26,14 +26,15 @@ const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in millisec
 
 thread_local! {
     pub(crate) static PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    pub(crate) static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
     pub(crate) static USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
     pub(crate) static UP_JWT: Cell<String> = Cell::new("".to_string());
     pub(crate) static ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
+    pub(crate) static UUID: Cell<String> = Cell::new("".to_string());
 
     // static LAYER8_LIGHT_SAIL_URL: Cell<String> = Cell::new("".to_string());
     static COUNTER: Cell<i32> = const { Cell::new(0) };
-    static PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static UUID: Cell<String> = Cell::new("".to_string());
+
     static STATIC_PATHS: Cell<Vec<String>> = const { Cell::new(vec![]) };
     static L8_CLIENTS: Cell<HashMap<String, types::Client>> = Cell::new(HashMap::new());
 
@@ -668,7 +669,7 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
 
     let res = reqwest::Client::new()
         .post(&proxy)
-        .body(b64_pub_jwk.clone())
+        // .body(b64_pub_jwk.clone())
         .headers({
             let mut headers = reqwest::header::HeaderMap::new();
             let uuid = Uuid::new_v4().to_string();
