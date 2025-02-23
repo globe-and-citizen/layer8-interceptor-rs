@@ -1,11 +1,11 @@
 use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use js_sys::{ArrayBuffer, Function, Uint8Array};
+use js_sys::Function;
 use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
+use web_sys::{BinaryType, Event, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
     crypto::{generate_key_pair, jwk_from_map, KeyUse},
@@ -13,7 +13,7 @@ use layer8_primitives::{
 };
 
 use crate::{
-    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PRIVATE_JWK_ECDH, PUB_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY, UUID},
+    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PRIVATE_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY, UUID},
     js_imports_prelude::*,
 };
 
@@ -546,7 +546,7 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
             let slice = symmetric_key
                 .symmetric_decrypt(
                     &base64_enc_dec
-                        .decode(&payload.expect_throw("we expect there to be a payload in the response"))
+                        .decode(payload.expect_throw("we expect there to be a payload in the response"))
                         .expect_throw("Failed to decode base64 payload"),
                 )
                 .unwrap();
