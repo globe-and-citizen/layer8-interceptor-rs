@@ -41,8 +41,6 @@ export default {
       console.error(error);
     }
 
-    console.log("check execution")
-
     this.socket.onmessage = (event) => {
       this.messages.push({ text: event.data, id: Math.random() });
     };

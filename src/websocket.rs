@@ -461,7 +461,7 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     pub fn send(&self, data: JsValue) -> Result<(), JsValue> {
         console_log!(&format!("Sending data: {:?}", data));
-        let reader = FileReaderSync::new()?;
+        // let reader = FileReaderSync::new()?;
 
         let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,
@@ -480,30 +480,34 @@ impl WasmWebSocketRef {
         if data.is_string() {
             let encrypted = symmetric_key.symmetric_encrypt(data.as_string().unwrap().as_bytes())?;
             ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        } else if data.is_instance_of::<Blob>() {
-            let data = {
-                let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
-                Uint8Array::new(&array).to_vec()
-            };
-
-            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        } else if data.is_instance_of::<ArrayBuffer>() {
-            let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
-
-            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        } else if data.is_instance_of::<Uint8Array>() {
-            let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
-            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else {
             return Err(JsValue::from_str("Unsupported data type"));
         }
 
+        // } else if data.is_instance_of::<Blob>() {
+        //     let data = {
+        //         let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
+        //         Uint8Array::new(&array).to_vec()
+        //     };
+
+        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        // } else if data.is_instance_of::<ArrayBuffer>() {
+        //     let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
+
+        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        // } else if data.is_instance_of::<Uint8Array>() {
+        //     let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
+        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        // } else {
+        //     return Err(JsValue::from_str("Unsupported data type"));
+        // }
+
         LAYER8_SOCKETS.with_borrow_mut(|v| {
             let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
-            let data = serde_json::to_vec(&ws_exchange).map_err(|e| e.to_string())?;
+            let data = serde_json::to_vec(&Layer8Envelope::WebSocket(ws_exchange)).map_err(|e| e.to_string())?;
             ws.socket.send_with_u8_array(&data)
         })
     }
@@ -521,9 +525,23 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
         };
 
         let data: JsValue = {
-            let payload = serde_json::from_slice::<WebSocketPayload>(&Uint8Array::new(&message.data()).to_vec())
-                .expect_throw("Failed to parse WebSocketPayload")
-                .payload;
+            let payload = {
+                console_log!(&format!("Inbound data: {:?}", &message.data()));
+                let msg = message.data().as_string().expect("expected the message to be a string");
+                let envelope = Layer8Envelope::from_json_bytes(msg.as_bytes()).expect_throw(&format!(
+                    "Failed to parse inbound message: {}",
+                    message.data().as_string().expect_throw("expected the message frame to be a string")
+                ));
+
+                // we expect a websocket payload
+                match envelope {
+                    Layer8Envelope::WebSocket(ws_payload) => ws_payload.payload,
+                    _ => {
+                        console_log!("Expected a WebSocket payload");
+                        return;
+                    }
+                }
+            };
 
             let slice = symmetric_key
                 .symmetric_decrypt(
@@ -533,7 +551,10 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
                 )
                 .unwrap();
 
-            Uint8Array::from(slice.as_slice()).into()
+            // we assume we are dealing with a string, here for now; todo!
+            JsValue::from_str(&String::from_utf8_lossy(&slice))
+
+            // Uint8Array::from(slice.as_slice()).into()
         };
 
         let msg_event = {
