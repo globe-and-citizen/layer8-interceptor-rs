@@ -3,7 +3,7 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::js_imports::{self, get_storage_estimate};
+use crate::js_glue::js_imports::{self, get_storage_estimate};
 
 // These statics are declared here to avoid import cycles if we coupled them with the rest in `./js.rs`.
 thread_local! {
@@ -21,18 +21,18 @@ thread_local! {
 ///    // The proxy URL to establish the encrypted tunnel.
 ///    proxy:       string;
 ///    // Deprecated: `staticPath` is used for backwards compatibility, use `staticPaths` instead.
-///    staticPath:  string;
+///    staticPath:  string | undefined;
 ///    // The list of paths to serve static assets from.
-///    staticPaths: string[];
+///    staticPaths: string[] | undefined;
 ///    // The maximum size of assets to cache. The value is in MB.
-///    cacheAssetLimit?: number;
+///    cacheAssetLimit: number | undefined;
 /// }
 /// ```
 #[derive(Default)]
 pub(crate) struct InitConfig {
-    pub(crate) providers: Vec<String>,
     pub(crate) proxy: String,
     pub(crate) static_paths: Vec<String>,
+    pub(crate) providers: Vec<String>,
 }
 
 impl InitConfig {
@@ -49,10 +49,11 @@ impl InitConfig {
                     }
 
                     for provider in js_sys::Array::from(&val.get(1)).iter() {
-                        let value: String = provider
-                            .as_string()
-                            .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?;
-                        init_config.providers.push(value);
+                        init_config.providers.push(
+                            provider
+                                .as_string()
+                                .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?,
+                        )
                     }
                 }
 
