@@ -25,8 +25,9 @@ extern "C" {
 }
 
 /// This block imports JavaScript functionality that is not mapped by the wasm-bindgen tool.
-#[wasm_bindgen(module = "/src/indexed_db.js")]
+#[wasm_bindgen(module = "/src/js_glue/glue_indexed_db.js")]
 extern "C" {
+    /// This operation clears the cache of a specific database.
     pub fn clear_expired_cache(db_name: &str, db_cache: DbCache);
     #[wasm_bindgen(catch)]
     pub async fn serve_static(
@@ -37,8 +38,12 @@ extern "C" {
         url: &str,
         exp_in_seconds: i32,
     ) -> Result<JsValue, JsValue>;
+
+    /// This operation checks if an asset exists in the cache, if it does, it returns the asset.
     #[wasm_bindgen(js_name = check_if_exists, catch)]
     pub async fn check_if_asset_exists(db_name: &str, url: &str) -> Result<JsValue, JsValue>;
+
+    /// This operation retrieves the storage estimate of the cache.
     #[wasm_bindgen(catch)]
     pub async fn get_storage_estimate() -> Result<JsValue, JsValue>;
 }
