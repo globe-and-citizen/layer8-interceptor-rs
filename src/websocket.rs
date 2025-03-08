@@ -24,11 +24,23 @@ thread_local! {
 
 /// The configuration object for the WebSocket.
 #[wasm_bindgen(getter_with_clone)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InitConfig {
     pub url: String,
     pub proxy: String,
+    pub reconnect: bool,
     pub protocols: Option<Vec<String>>,
+}
+
+impl Default for InitConfig {
+    fn default() -> Self {
+        InitConfig {
+            url: String::new(),
+            proxy: String::new(),
+            reconnect: true,
+            protocols: None,
+        }
+    }
 }
 
 impl InitConfig {
@@ -120,12 +132,10 @@ impl WasmWebSocket {
         let rebuilt_url = rebuild_url(&options.url);
 
         // if already present, return the existing socket ref
-        if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| {
-            if val.get(&rebuilt_url).is_some() {
-                Some(rebuilt_url.clone())
-            } else {
-                None
-            }
+        if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| match val.get(&rebuilt_url) {
+            x if x.is_some() && x.unwrap().socket.ready_state() >= BrowserWebSocket::CLOSING => None,
+            x if x.is_some() => Some(rebuilt_url.clone()),
+            _ => None,
         }) {
             return Ok(WasmWebSocketRef(val));
         }
@@ -461,7 +471,6 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     pub fn send(&self, data: JsValue) -> Result<(), JsValue> {
         console_log!(&format!("Sending data: {:?}", data));
-        // let reader = FileReaderSync::new()?;
 
         let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,

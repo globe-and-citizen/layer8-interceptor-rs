@@ -19,7 +19,7 @@ make build-experimental
 
 #### Using websockets
 
-To use websockets, we can use our library as so
+To use websockets, we can use our library as so:
 
 ```js
 import { WebSocket } from 'layer8-interceptor-rs'
@@ -53,6 +53,8 @@ mounted() {
 
 // other code here...
 ```
+
+Check the [example](./service_provider_mock/game-arena) for a full example.
 
 ## How To Build
 
