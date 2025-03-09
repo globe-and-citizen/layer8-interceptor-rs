@@ -69,6 +69,18 @@
       </div>
     </div>
 
+    <!-- chat with opponent section -->
+    <div v-if="opponent" class="chat">
+      <h2>Chat with Opponent</h2>
+      <div v-if="chatMessages.length" class="chat-window">
+        <div v-for="(message, index) in chatMessages" :key="index" class="chat-message">
+          <span><strong>{{ message.sender }}:</strong> {{ message.text }}</span>
+        </div>
+      </div>
+      <input v-model="chatInput" @keydown.enter="sendMessage" placeholder="Type a message..." class="chat-input" />
+      <button @click="sendMessage" class="btn">Send</button>
+    </div>
+
     <!-- leaderBoard -->
     <div v-if="leaderBoard.length" class="leaderboard">
       <h2>Leaderboard</h2>
@@ -141,7 +153,9 @@ export default {
       error: null,
       playerRegistered: false,
       gameLobby: [],
-      gameLogs: []
+      gameLogs: [],
+      chatMessages: [],
+      chatInput: null
     };
   },
   async mounted() {
@@ -174,18 +188,7 @@ export default {
       this.socket.onclose = () => {
         this.connected = false;
         console.log('Disconnected from server');
-        let connects = this.connects;
         setTimeout(async () => await this.connectToServer(), 3000);
-
-        if (this.connected && this.connects > connects) {
-          console.log('ws reconnect attempt succeeded')
-        } else {
-
-          console.error("Connected: ", this.connected)
-          console.error("Connect attempts: ", connects)
-
-          console.error('ws reconnect attempt failed')
-        }
       };
 
       this.socket.onerror = (error) => {
@@ -230,31 +233,54 @@ export default {
           this.gameOver = message.gameOver;
           this.winner = message.winner;
           this.opponentId = message.opponentId;
+
+          // update the leaderboard
+          this.socket.send(JSON.stringify({
+            type: 'LEADERBOARD'
+          }));
+
           break;
 
-        case 'GAME_RESET':
+        case 'RESET_GAME':
           console.log('received reset: ', message)
           this.board = message.board;
           this.isYourTurn = message.isYourTurn;
           this.gameOver = false;
           this.winner = null;
           this.opponentId = message.opponentId;
+
+          // update the leaderboard
+          this.socket.send(JSON.stringify({
+            type: 'LEADERBOARD'
+          }));
+
           break;
 
         case 'OPPONENT_DISCONNECTED':
           this.error = 'Your opponent disconnected.';
           this.opponent = false;
+
+          // update the leaderboard
+          this.socket.send(JSON.stringify({
+            type: 'LEADERBOARD'
+          }));
+
           break;
 
         case 'LEADERBOARD':
-          console.log("gameLogs received: ", message.gameLogs);
           this.leaderBoard = message.leaderBoard;
           this.gameLogs = message.gameLogs;
           break;
 
         case "GAME_LOBBY":
-          console.log("Lobby: ", message.gameLobby);
           this.gameLobby = message.gameLobby;
+          break;
+
+        case "GAME_CHAT":
+          this.chatMessages.push({
+            sender: message.sender,
+            text: message.text
+          });
           break;
 
         case 'ERROR':
@@ -269,6 +295,7 @@ export default {
 
     createGame() {
       this.error = null;
+      this.chatMessages = [];
       this.socket.send(JSON.stringify({
         type: 'CREATE_GAME',
         name: this.playerId
@@ -282,6 +309,7 @@ export default {
       }
 
       this.error = null;
+      this.chatMessages = [];
       this.socket.send(JSON.stringify({
         type: 'JOIN_GAME',
         gameId: gameIdInput.trim(),
@@ -322,7 +350,7 @@ export default {
       }
 
       this.socket.send(JSON.stringify({
-        type: 'MAKE_MOVE',
+        type: 'MOVE_MADE',
         position,
         board: this.board,
         gameOver: this.gameOver,
@@ -353,6 +381,22 @@ export default {
         type: 'RESET_GAME',
         name: this.playerId,
         gameId: this.gameId
+      }));
+    },
+
+    sendMessage() {
+      if (!this.chatInput.trim()) {
+        this.error = "Please provide a message";
+        return;
+      }
+
+      let message = this.chatInput;
+      this.chatInput = null;
+      this.socket.send(JSON.stringify({
+        type: "GAME_CHAT",
+        gameId: this.gameId,
+        sender: this.playerId,
+        text: message
       }));
     }
   }
@@ -562,4 +606,55 @@ h1 {
   background-color: #e8f5e9;
 }
 
+.chat {
+  margin: 30px 0;
+  text-align: left;
+}
+
+.chat h2 {
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.chat-window {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: #f5f5f5;
+  margin-bottom: 20px;
+}
+
+.chat-message {
+  margin-bottom: 10px;
+}
+
+.chat-input {
+  width: calc(100% - 90px);
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+
+.chat .btn {
+  padding: 10px 20px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
+}
+
+.chat .btn:hover {
+  background-color: #45a049;
+}
+
+.chat-input,
+.chat .btn {
+  margin-bottom: 10px;
+}
 </style>
