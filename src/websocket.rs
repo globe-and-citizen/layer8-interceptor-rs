@@ -109,6 +109,12 @@ struct WasmWebSocket {
     socket: BrowserWebSocket,
 }
 
+impl Drop for WasmWebSocket {
+    fn drop(&mut self) {
+        _ = self.socket.close()
+    }
+}
+
 /// This is a reference to the WebSocket object.
 /// The implementation does not support SharedArrayBuffers.
 ///
@@ -117,24 +123,14 @@ struct WasmWebSocket {
 #[derive(Debug, Default)]
 struct WasmWebSocketRef(String);
 
-impl Drop for WasmWebSocket {
-    fn drop(&mut self) {
-        console_log!("Dropping WebSocketRef");
-        LAYER8_SOCKETS.with_borrow_mut(|val| {
-            val.remove(&rebuild_url(&self.socket.url()));
-        });
-    }
-}
-
 impl WasmWebSocket {
     async fn init_(options: js_sys::Object) -> Result<WasmWebSocketRef, JsValue> {
         let options = InitConfig::new(options)?;
         let rebuilt_url = rebuild_url(&options.url);
 
-        // if already present, return the existing socket ref
-        if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| match val.get(&rebuilt_url) {
-            x if x.is_some() && x.unwrap().socket.ready_state() >= BrowserWebSocket::CLOSING => None,
-            x if x.is_some() => Some(rebuilt_url.clone()),
+        // if already present & in open state, return the existing socket ref
+        if let Some(val) = LAYER8_SOCKETS.with_borrow_mut(|val| match val.get(&rebuilt_url) {
+            Some(x) if x.socket.ready_state() <= BrowserWebSocket::OPEN => Some(rebuilt_url.clone()),
             _ => None,
         }) {
             return Ok(WasmWebSocketRef(val));
@@ -536,7 +532,7 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
         let data: JsValue = {
             let payload = {
                 console_log!(&format!("Inbound data: {:?}", &message.data()));
-                let msg = message.data().as_string().expect("expected the message to be a string");
+                let msg = message.data().as_string().expect_throw("expected the message to be a string");
                 let envelope = Layer8Envelope::from_json_bytes(msg.as_bytes()).expect_throw(&format!(
                     "Failed to parse inbound message: {}",
                     message.data().as_string().expect_throw("expected the message frame to be a string")
@@ -558,7 +554,7 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
                         .decode(payload.expect_throw("we expect there to be a payload in the response"))
                         .expect_throw("Failed to decode base64 payload"),
                 )
-                .unwrap();
+                .expect_throw("Failed to decrypt the message; this is a bug in the code, please report it to the developers");
 
             // we assume we are dealing with a string, here for now; todo!
             JsValue::from_str(&String::from_utf8_lossy(&slice))
@@ -572,7 +568,11 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
             MessageEvent::new_with_event_init_dict("message", &msg_init).expect_throw("Failed to create MessageEventInit")
         };
 
-        pipeline.as_ref().map(|pipeline| pipeline.call1(&JsValue::NULL, &msg_event).unwrap());
+        pipeline.as_ref().map(|pipeline| {
+            if let Err(err) = pipeline.call1(&JsValue::NULL, &msg_event) {
+                console_error!(&format!("Failed to call pipeline: {:?}", err));
+            }
+        });
     }) as Box<dyn FnMut(MessageEvent)>);
 
     decrypt_callback.into_js_value().dyn_into().unwrap()

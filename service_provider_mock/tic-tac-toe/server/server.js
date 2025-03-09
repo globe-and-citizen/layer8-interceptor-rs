@@ -23,14 +23,14 @@ app.get('*', (req, res) => {
 const wss = new WebSocket.Server({ server });
 
 // Game state
-const games = new Map();
-const playerConnections = new Map();
+let games = new Map();
+let playerConnections = new Map();
 
 // This is a two dimensional array, having the: | playerId | score |
-var leaderBoard = [];
-// This is an object array, having {host, gameId}
-var gameLobby = [];
-var gameLogs = [];
+let leaderBoard = [];
+// This is an object array, having {host, guest, gameId}
+let gameLobby = [];
+let gameLogs = [];
 
 // WebSocket connection handler
 wss.on('connection', (ws) => {
@@ -56,7 +56,7 @@ wss.on('connection', (ws) => {
                     handleJoinGame(ws, data.name, data.gameId);
                     break;
 
-                case 'MAKE_MOVE':
+                case 'MOVE_MADE':
                     handleMakeMove(ws, data.name, data.position);
                     break;
 
@@ -78,6 +78,11 @@ wss.on('connection', (ws) => {
                         type: "GAME_LOBBY",
                         gameLobby
                     }))
+                    break;
+
+                case "GAME_CHAT":
+                    console.log('received game chat broadcast request');
+                    gameChat(data.gameId, data.sender, data.text);
                     break;
 
                 default:
@@ -139,6 +144,28 @@ wss.on('connection', (ws) => {
         });
 
         broadcastLobby();
+    }
+
+    function gameChat(gameId, sender, text) {
+        const game = games.get(gameId);
+        if (!game)
+            return ws.send(JSON.stringify({
+                type: 'ERROR',
+                message: 'Game not found'
+            }));
+
+        // Notify both players of the chat
+        game.players.forEach(pid => {
+            const connection = playerConnections.get(pid);
+            if (connection && connection.ws.readyState === WebSocket.OPEN) {
+                connection.ws.send(JSON.stringify({
+                    type: 'GAME_CHAT',
+                    gameId,
+                    sender,
+                    text
+                }));
+            }
+        });
     }
 
     function handleJoinGame(ws, name, requestedGameId) {
@@ -237,14 +264,12 @@ wss.on('connection', (ws) => {
         game.gameOver = gameOver;
 
         const otherPlayerId = game.players.find(id => id !== playerId);
-        if (playerInfo.symbol === winner) {
+        if (playerInfo.symbol === winner)
             givePointsToPlayer(playerId, otherPlayerId);
-        }
 
         // Switch turns if game is not over
-        if (!gameOver) {
+        if (!gameOver)
             game.currentTurn = otherPlayerId;
-        }
 
         // Notify both players of the move
         game.players.forEach(pid => {
@@ -280,7 +305,7 @@ wss.on('connection', (ws) => {
         const secondPlayerId = game.players[1];
 
         // If X went first last time, O goes first this time
-        if (game.currentTurn === firstPlayerId) {
+        if (game.currentTurn == firstPlayerId) {
             game.currentTurn = secondPlayerId;
         } else {
             game.currentTurn = firstPlayerId;
@@ -291,14 +316,11 @@ wss.on('connection', (ws) => {
             const connection = playerConnections.get(pid);
             if (connection && connection.ws.readyState === WebSocket.OPEN) {
                 connection.ws.send(JSON.stringify({
-                    type: 'GAME_RESET',
+                    type: 'RESET_GAME',
                     board: game.board,
-                    isYourTurn: game.currentTurn === pid,
-                    opponentId: game.players.find(id => id !== pid)
+                    isYourTurn: game.currentTurn == pid,
+                    opponentId: game.players.find(id => id != pid)
                 }));
-
-                console.log("should reset for player: ", pid);
-                broadcastLeaderBoard();
             }
         });
     }
@@ -324,8 +346,6 @@ wss.on('connection', (ws) => {
                 connection.ws.send(JSON.stringify({
                     type: 'OPPONENT_DISCONNECTED'
                 }));
-
-                broadcastLeaderBoard()
             }
         }
 
@@ -344,9 +364,9 @@ wss.on('connection', (ws) => {
     }
 
     function givePointsToPlayer(playerId, opponentId) {
-        gameLogs.push(`${playerId} won against ${opponentId} at ${new Date().toString()}`)
+        gameLogs.unshift(`${playerId} won against ${opponentId} at ${new Date().toString()}`)
 
-        var updated = false;
+        let updated = false;
         for (i in leaderBoard) {
             // ["name", 5]
             if (leaderBoard[i][0] === playerId.trim()) {
@@ -359,19 +379,6 @@ wss.on('connection', (ws) => {
         // entry was not present in leaderBoard
         if (!updated)
             leaderBoard.push([playerId, 1]);
-
-        broadcastLeaderBoard();
-    }
-
-    function broadcastLeaderBoard() {
-        orderByScore();
-        wss.clients.forEach(function each(client) {
-            client.send(JSON.stringify({
-                type: "LEADERBOARD",
-                leaderBoard,
-                gameLogs
-            }));
-        })
     }
 
     function broadcastLobby(saveFor) {
