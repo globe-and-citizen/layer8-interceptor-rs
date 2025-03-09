@@ -9,6 +9,7 @@
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
+    "@vueuse/integrations": "^12.8.2",
     "layer8-interceptor-rs": "file:../../pkg",
     "universal-cookie": "^7.2.2",
     "vite-plugin-top-level-await": "^1.4.4",

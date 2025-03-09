@@ -80,9 +80,18 @@ wss.on('connection', (ws) => {
                     }))
                     break;
 
+                case "GAME_REF":
+                    gameRef(data.playerId);
+                    break;
+
                 case "GAME_CHAT":
                     console.log('received game chat broadcast request');
                     gameChat(data.gameId, data.sender, data.text);
+                    break;
+
+                case "END_GAME":
+                    console.log('received end game request');
+                    handlePlayerDisconnect(data.playerId, data.gameId);
                     break;
 
                 default:
@@ -95,18 +104,22 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         handlePlayerDisconnect(playerId_, gameId_);
+        playerConnections.delete(pid);
         console.log('Client disconnected');
     });
 
     // Handler functions
     function handleCreateGame(ws, name) {
         // if there's already an active connection with this player id refuse with error
-        if (playerConnections.get(name)) {
-            return ws.send(JSON.stringify({
-                type: 'ERROR',
-                message: `The player with id: "${name}" already exists and is currently playing a game`
-            }));
-        }
+        if (playerConnections.get(name))
+            games.forEach((game, key) => {
+                if (game.players.includes(name)) {
+                    return ws.send(JSON.stringify({
+                        type: 'ERROR',
+                        message: `The player with id: "${name}" already exists and is currently playing a game`
+                    }));
+                }
+            });
 
         // Generate unique IDs
         gameId_ = uuidv4();
@@ -185,12 +198,15 @@ wss.on('connection', (ws) => {
                 message: 'Game is full'
             }));
 
-        if (playerConnections.get(name)) {
-            return ws.send(JSON.stringify({
-                type: "ERROR",
-                message: `The player with id: "${name}" already exists and is currently playing a game`
-            }))
-        }
+        if (playerConnections.get(name))
+            games.forEach((game, key) => {
+                if (game.players.includes(name)) {
+                    return ws.send(JSON.stringify({
+                        type: 'ERROR',
+                        message: `The player with id: "${name}" already exists and is currently playing a game`
+                    }));
+                }
+            });
 
         // Join the game
         gameId_ = requestedGameId;
@@ -236,6 +252,33 @@ wss.on('connection', (ws) => {
                 break;
             }
         }
+    }
+
+    function gameRef(playerId) {
+        games.forEach((game, key) => {
+            if (game.players.includes(playerId)) {
+                let playerInfo = playerConnections.get(playerId);
+                playerConnections.set(playerId, {
+                    ws,
+                    gameId: key,
+                    symbol: playerInfo.symbol
+                });
+
+                gameId_ = key;
+                playerId_ = playerId;
+
+                ws.send(JSON.stringify({
+                    type: "GAME_REF",
+                    gameId: key,
+                    board: game.board,
+                    isYourTurn: !game.gameOver && game.currentTurn === playerId,
+                    gameOver: game.gameOver,
+                    winner: game.winner,
+                    symbol: playerInfo.symbol,
+                    opponentId: game.players.find(id => id !== playerId)
+                }));
+            }
+        });
     }
 
     function handleMakeMove(ws, playerId, position) {
@@ -328,9 +371,6 @@ wss.on('connection', (ws) => {
     function handlePlayerDisconnect(pid, gid) {
         if (!pid || !gid) return;
 
-        // Remove player connection
-        playerConnections.delete(pid);
-
         // Get the game
         const game = games.get(gid);
         if (!game) return;
@@ -349,14 +389,17 @@ wss.on('connection', (ws) => {
             }
         }
 
-        // Remove the game if no players left
-        if (game.players.every(id => !playerConnections.has(id))) {
-            games.delete(gid);
-            for (idx in gameLobby) {
-                if (gameLobby[idx].gameId == gid)
-                    gameLobby.splice(idx, 1);
+        // remove game from lobby
+        for (idx in gameLobby) {
+            if (gameLobby[idx].gameId == gid) {
+                gameLobby.splice(idx, 1);
+                broadcastLobby();
+                break;
             }
         }
+
+        console.log('deleting game')
+        games.delete(gid);
     }
 
     function orderByScore() {

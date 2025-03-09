@@ -47,8 +47,7 @@ tokio = { version = "1", optional = true, features = ["sync"] }
 layer8-tungstenite = { git = "https://github.com/globe-and-citizen/layer8-tungstenite.git", branch = "master" }
 
 [features]
-default = []
-
+default = ["experimental"]
 # ⚠️ Unstable; work on the feature is highly experimental and no guarantees are given
 experimental = ["websocket", "dep:tokio"]
 websocket = [

@@ -568,11 +568,11 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
             MessageEvent::new_with_event_init_dict("message", &msg_init).expect_throw("Failed to create MessageEventInit")
         };
 
-        pipeline.as_ref().map(|pipeline| {
+        if let Some(pipeline) = pipeline.as_ref() {
             if let Err(err) = pipeline.call1(&JsValue::NULL, &msg_event) {
                 console_error!(&format!("Failed to call pipeline: {:?}", err));
             }
-        });
+        }
     }) as Box<dyn FnMut(MessageEvent)>);
 
     decrypt_callback.into_js_value().dyn_into().unwrap()
