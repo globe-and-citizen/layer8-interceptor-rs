@@ -1,11 +1,11 @@
 use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use js_sys::Function;
+use js_sys::{ArrayBuffer, Function, Uint8Array};
 use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Event, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
+use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
     crypto::{generate_key_pair, jwk_from_map, KeyUse},
@@ -24,11 +24,23 @@ thread_local! {
 
 /// The configuration object for the WebSocket.
 #[wasm_bindgen(getter_with_clone)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InitConfig {
     pub url: String,
     pub proxy: String,
+    pub reconnect: bool,
     pub protocols: Option<Vec<String>>,
+}
+
+impl Default for InitConfig {
+    fn default() -> Self {
+        InitConfig {
+            url: String::new(),
+            proxy: String::new(),
+            reconnect: true,
+            protocols: None,
+        }
+    }
 }
 
 impl InitConfig {
@@ -97,6 +109,12 @@ struct WasmWebSocket {
     socket: BrowserWebSocket,
 }
 
+impl Drop for WasmWebSocket {
+    fn drop(&mut self) {
+        _ = self.socket.close()
+    }
+}
+
 /// This is a reference to the WebSocket object.
 /// The implementation does not support SharedArrayBuffers.
 ///
@@ -105,27 +123,15 @@ struct WasmWebSocket {
 #[derive(Debug, Default)]
 struct WasmWebSocketRef(String);
 
-impl Drop for WasmWebSocket {
-    fn drop(&mut self) {
-        console_log!("Dropping WebSocketRef");
-        LAYER8_SOCKETS.with_borrow_mut(|val| {
-            val.remove(&rebuild_url(&self.socket.url()));
-        });
-    }
-}
-
 impl WasmWebSocket {
     async fn init_(options: js_sys::Object) -> Result<WasmWebSocketRef, JsValue> {
         let options = InitConfig::new(options)?;
         let rebuilt_url = rebuild_url(&options.url);
 
-        // if already present, return the existing socket ref
-        if let Some(val) = LAYER8_SOCKETS.with_borrow(|val| {
-            if val.get(&rebuilt_url).is_some() {
-                Some(rebuilt_url.clone())
-            } else {
-                None
-            }
+        // if already present & in open state, return the existing socket ref
+        if let Some(val) = LAYER8_SOCKETS.with_borrow_mut(|val| match val.get(&rebuilt_url) {
+            Some(x) if x.socket.ready_state() <= BrowserWebSocket::OPEN => Some(rebuilt_url.clone()),
+            _ => None,
         }) {
             return Ok(WasmWebSocketRef(val));
         }
@@ -461,7 +467,6 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     pub fn send(&self, data: JsValue) -> Result<(), JsValue> {
         console_log!(&format!("Sending data: {:?}", data));
-        // let reader = FileReaderSync::new()?;
 
         let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,
@@ -480,30 +485,25 @@ impl WasmWebSocketRef {
         if data.is_string() {
             let encrypted = symmetric_key.symmetric_encrypt(data.as_string().unwrap().as_bytes())?;
             ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<Blob>() {
+            let data = {
+                let reader = FileReaderSync::new().expect_throw("Failed to create FileReader");
+                let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
+                Uint8Array::new(&array).to_vec()
+            };
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<ArrayBuffer>() {
+            let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<Uint8Array>() {
+            let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else {
             return Err(JsValue::from_str("Unsupported data type"));
         }
-
-        // } else if data.is_instance_of::<Blob>() {
-        //     let data = {
-        //         let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
-        //         Uint8Array::new(&array).to_vec()
-        //     };
-
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else if data.is_instance_of::<ArrayBuffer>() {
-        //     let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
-
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else if data.is_instance_of::<Uint8Array>() {
-        //     let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else {
-        //     return Err(JsValue::from_str("Unsupported data type"));
-        // }
 
         LAYER8_SOCKETS.with_borrow_mut(|v| {
             let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
@@ -527,7 +527,7 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
         let data: JsValue = {
             let payload = {
                 console_log!(&format!("Inbound data: {:?}", &message.data()));
-                let msg = message.data().as_string().expect("expected the message to be a string");
+                let msg = message.data().as_string().expect_throw("expected the message to be a string");
                 let envelope = Layer8Envelope::from_json_bytes(msg.as_bytes()).expect_throw(&format!(
                     "Failed to parse inbound message: {}",
                     message.data().as_string().expect_throw("expected the message frame to be a string")
@@ -549,7 +549,7 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
                         .decode(payload.expect_throw("we expect there to be a payload in the response"))
                         .expect_throw("Failed to decode base64 payload"),
                 )
-                .unwrap();
+                .expect_throw("Failed to decrypt the message; this is a bug in the code, please report it to the developers");
 
             // we assume we are dealing with a string, here for now; todo!
             JsValue::from_str(&String::from_utf8_lossy(&slice))
@@ -563,7 +563,11 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
             MessageEvent::new_with_event_init_dict("message", &msg_init).expect_throw("Failed to create MessageEventInit")
         };
 
-        pipeline.as_ref().map(|pipeline| pipeline.call1(&JsValue::NULL, &msg_event).unwrap());
+        if let Some(pipeline) = pipeline.as_ref() {
+            if let Err(err) = pipeline.call1(&JsValue::NULL, &msg_event) {
+                console_error!(&format!("Failed to call pipeline: {:?}", err));
+            }
+        }
     }) as Box<dyn FnMut(MessageEvent)>);
 
     decrypt_callback.into_js_value().dyn_into().unwrap()

@@ -17,8 +17,8 @@ import { L8WebSocket } from 'layer8-interceptor-rs';
 // const BACKEND_URL =  import.meta.env.BACKEND_URL
 // const LAYER8_URL =  import.meta.env.LAYER8_URL
 
-const LAYER8_URL="http://localhost:5001"
-const BACKEND_URL="http://localhost:8000"
+// const LAYER8_URL="http://localhost:5001"
+// const BACKEND_URL="http://localhost:8000"  
 
 export default {
   name: 'ChatView',
