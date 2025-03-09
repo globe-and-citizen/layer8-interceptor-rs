@@ -1,11 +1,11 @@
 use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
-use js_sys::Function;
+use js_sys::{ArrayBuffer, Function, Uint8Array};
 use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use web_sys::{BinaryType, Event, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
+use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
     crypto::{generate_key_pair, jwk_from_map, KeyUse},
@@ -485,30 +485,25 @@ impl WasmWebSocketRef {
         if data.is_string() {
             let encrypted = symmetric_key.symmetric_encrypt(data.as_string().unwrap().as_bytes())?;
             ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<Blob>() {
+            let data = {
+                let reader = FileReaderSync::new().expect_throw("Failed to create FileReader");
+                let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
+                Uint8Array::new(&array).to_vec()
+            };
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<ArrayBuffer>() {
+            let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
+        } else if data.is_instance_of::<Uint8Array>() {
+            let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
+            let encrypted = symmetric_key.symmetric_encrypt(&data)?;
+            ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
         } else {
             return Err(JsValue::from_str("Unsupported data type"));
         }
-
-        // } else if data.is_instance_of::<Blob>() {
-        //     let data = {
-        //         let array = reader.read_as_array_buffer(&data.dyn_into::<Blob>().expect("check already done; qed"))?;
-        //         Uint8Array::new(&array).to_vec()
-        //     };
-
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else if data.is_instance_of::<ArrayBuffer>() {
-        //     let data = Uint8Array::new(&data.dyn_into::<ArrayBuffer>().expect("check already done; qed")).to_vec();
-
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else if data.is_instance_of::<Uint8Array>() {
-        //     let data = data.dyn_into::<Uint8Array>().expect("check already done; qed").to_vec();
-        //     let encrypted = symmetric_key.symmetric_encrypt(&data)?;
-        //     ws_exchange.payload = Some(base64_enc_dec.encode(&encrypted));
-        // } else {
-        //     return Err(JsValue::from_str("Unsupported data type"));
-        // }
 
         LAYER8_SOCKETS.with_borrow_mut(|v| {
             let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
