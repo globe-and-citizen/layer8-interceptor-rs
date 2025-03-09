@@ -4,17 +4,23 @@
   <div class="tic-tac-toe">
     <h1>Tic Tac Toe</h1>
 
-    <div v-if="!connected" class="connecting">
-      Connecting to server...
+    <div v-if="playerId">
+      Currently playing as: <strong>{{ playerId }}</strong>
     </div>
+
+    <div v-if="!connected" class="connecting">Connecting to server...</div>
 
     <!-- if playerId does not exist we need to "register" this player -->
     <div v-else-if="!playerId || !playerRegistered" class="join-form">
       <input v-model="playerId" placeholder="Enter Username (if you've played before use previous)"
         class="game-id-input" />
       <button @click="registerPlayer" class="btn">Register</button>
-      <button :disabled="!playerId" @click="playerRegistered = false; playerId = null;"
-        class="btn btn-secondary">Cancel</button>
+      <button :disabled="!playerId" @click="
+        playerRegistered = false;
+      playerId = null;
+      " class="btn btn-secondary">
+        Cancel
+      </button>
     </div>
 
     <div v-else-if="!gameId" class="menu">
@@ -35,26 +41,37 @@
           </li>
         </ul>
       </div>
-      <button @click="playerId = null; playerRegistered = false" class="btn">Use Other PlayerId</button>
+      <button @click="
+        playerId = null;
+      playerRegistered = false;
+      " class="btn">
+        Change PlayerId
+      </button>
       <button @click="createGame" class="btn">Create New Game</button>
     </div>
 
     <div v-else>
       <div class="game-info">
-        <div v-if="gameId && !opponent">
-          <p>Waiting for opponent to join...</p>
-          <p>Share this Game ID: <strong>{{ gameId }}</strong></p>
+        <div v-if="gameId && !opponentId">
+          <p>Waiting for an opponent to pick you in the lobby...</p>
         </div>
 
         <div v-else-if="gameOver">
-          <p v-if="winner === playerSymbol">You won against <strong>{{ opponentId }}</strong>!</p>
-          <p v-else-if="winner">You lost against <strong>{{ opponentId }}</strong> !</p>
+          <p v-if="winner === playerSymbol">
+            You won against <strong>{{ opponentId }}</strong>!
+          </p>
+          <p v-else-if="winner">
+            You lost against <strong>{{ opponentId }}</strong> !
+          </p>
           <p v-else>It's a draw!</p>
           <button @click="resetGame" class="btn">Play Again</button>
         </div>
 
         <div v-else>
-          <p>You are playing as <strong>{{ playerSymbol }} </strong> against <strong> {{ opponentId }}</strong></p>
+          <p>
+            You are playing as <strong>{{ playerSymbol }} </strong> against
+            <strong> {{ opponentId }}</strong>
+          </p>
           <p v-if="isYourTurn">Your turn</p>
           <p v-else>Opponent's turn</p>
         </div>
@@ -69,8 +86,16 @@
       </div>
     </div>
 
+    <div v-if="error" class="error">
+      {{ error }}
+    </div>
+
+    <div v-if="gameId" class="end-game-option">
+      <button @click="endGame" class="btn btn-secondary">End Game</button>
+    </div>
+
     <!-- chat with opponent section -->
-    <div v-if="opponent" class="chat">
+    <div v-if="opponentId" class="chat">
       <h2>Chat with Opponent</h2>
       <div v-if="chatMessages.length" class="chat-window">
         <div v-for="(message, index) in chatMessages" :key="index" class="chat-message">
@@ -100,44 +125,49 @@
           </tr>
         </tbody>
       </table>
-      <div class="rules">
-      </div>
-
-      <div v-if="error" class="error">
-        {{ error }}
-      </div>
     </div>
 
     <!-- game logs -->
     <div v-if="gameLogs.length" class="gameLogs">
       <h2>Game Logs</h2>
       <ul v-for="(log, idx) in gameLogs" :key="idx">
-        <li> {{ log }} </li>
+        <li>{{ log }}</li>
       </ul>
     </div>
 
+    <div class="rules">
+      <h2>Game Rules</h2>
+      <ol>
+        <li>Each player takes turns to place their symbol (X or O) on the board.</li>
+        <li>The first player to align three of their symbols horizontally, vertically, or diagonally wins.</li>
+        <li>If all nine cells are filled without a winner, the game is declared a draw.</li>
+        <li>Winning a game awards 1 point.</li>
+        <li>Drawing or losing a game results in no points.</li>
+      </ol>
+    </div>
   </div>
 </template>
 
 <script>
-import { L8WebSocket } from 'layer8-interceptor-rs';
-import Cookies from 'universal-cookie';
+import { L8WebSocket } from "layer8-interceptor-rs";
+import { defineComponent } from "vue";
+import { useCookies } from "@vueuse/integrations/useCookies";
 
 // under .env file
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 const LAYER8_URL = import.meta.env.VITE_LAYER8_URL;
-const cookies = new Cookies(null, {
-  path: '/',
-  sameSite: true,
-  // expires after 3 months
-  expires: new Date()
-});
 
-export default {
-  name: 'TicTacToe',
+export default defineComponent({
+  name: "TicTacToe",
+  setup() {
+    const cookies = useCookies(["player"]);
+    return {
+      cookies,
+    };
+  },
+
   data() {
     return {
-      connects: 0,
       connected: false,
       socket: null,
       gameId: null,
@@ -172,8 +202,31 @@ export default {
         this.socket = new L8WebSocket();
         await this.socket.init({
           url: BACKEND_URL,
-          proxy: LAYER8_URL
+          proxy: LAYER8_URL,
         });
+
+        // checking the playerId
+        let player = this.cookies.get("player");
+        if (player) {
+          this.playerRegistered = true;
+          this.error = null;
+          this.playerId = player;
+
+          // get game refs
+          this.socket.send(
+            JSON.stringify({
+              type: "GAME_REF",
+              playerId: this.playerId,
+            })
+          );
+
+          // fetching the game lobby
+          this.socket.send(
+            JSON.stringify({
+              type: "GAME_LOBBY",
+            })
+          );
+        }
 
         this.connected = true;
       } catch (error) {
@@ -187,31 +240,33 @@ export default {
 
       this.socket.onclose = () => {
         this.connected = false;
-        console.log('Disconnected from server');
+        console.log("Disconnected from server");
         setTimeout(async () => await this.connectToServer(), 3000);
       };
 
       this.socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        this.error = 'Connection error. Please try again.';
+        console.error("WebSocket error:", error);
+        this.error = "Connection error. Please try again.";
       };
 
       // fetching the leaderboard
-      this.socket.send(JSON.stringify({
-        type: 'LEADERBOARD'
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "LEADERBOARD",
+        })
+      );
     },
 
     handleMessage(message) {
       switch (message.type) {
-        case 'GAME_CREATED':
+        case "GAME_CREATED":
           this.gameId = message.gameId;
           this.playerId = message.playerId;
           this.playerSymbol = message.symbol;
           this.isYourTurn = message.isYourTurn;
           break;
 
-        case 'GAME_JOINED':
+        case "GAME_JOINED":
           this.gameId = message.gameId;
           this.playerId = message.playerId;
           this.playerSymbol = message.symbol;
@@ -221,13 +276,12 @@ export default {
           this.opponentId = message.opponentId;
           break;
 
-        case 'OPPONENT_JOINED':
+        case "OPPONENT_JOINED":
           this.opponent = true;
           this.opponentId = message.opponentId;
           break;
 
-        case 'MOVE_MADE':
-          console.log("we've registered a move: ", message);
+        case "MOVE_MADE":
           this.board = message.board;
           this.isYourTurn = message.isYourTurn;
           this.gameOver = message.gameOver;
@@ -235,14 +289,15 @@ export default {
           this.opponentId = message.opponentId;
 
           // update the leaderboard
-          this.socket.send(JSON.stringify({
-            type: 'LEADERBOARD'
-          }));
+          this.socket.send(
+            JSON.stringify({
+              type: "LEADERBOARD",
+            })
+          );
 
           break;
 
-        case 'RESET_GAME':
-          console.log('received reset: ', message)
+        case "RESET_GAME":
           this.board = message.board;
           this.isYourTurn = message.isYourTurn;
           this.gameOver = false;
@@ -250,24 +305,28 @@ export default {
           this.opponentId = message.opponentId;
 
           // update the leaderboard
-          this.socket.send(JSON.stringify({
-            type: 'LEADERBOARD'
-          }));
+          this.socket.send(
+            JSON.stringify({
+              type: "LEADERBOARD",
+            })
+          );
 
           break;
 
-        case 'OPPONENT_DISCONNECTED':
-          this.error = 'Your opponent disconnected.';
+        case "OPPONENT_DISCONNECTED":
+          this.error = "Your opponent disconnected. You've won, game over!";
           this.opponent = false;
 
           // update the leaderboard
-          this.socket.send(JSON.stringify({
-            type: 'LEADERBOARD'
-          }));
+          this.socket.send(
+            JSON.stringify({
+              type: "LEADERBOARD",
+            })
+          );
 
           break;
 
-        case 'LEADERBOARD':
+        case "LEADERBOARD":
           this.leaderBoard = message.leaderBoard;
           this.gameLogs = message.gameLogs;
           break;
@@ -279,42 +338,59 @@ export default {
         case "GAME_CHAT":
           this.chatMessages.push({
             sender: message.sender,
-            text: message.text
+            text: message.text,
           });
           break;
 
-        case 'ERROR':
+        case "GAME_REF":
+          this.gameId = message.gameId;
+          this.board = message.board;
+          this.isYourTurn = message.isYourTurn;
+          this.gameOver = message.gameOver;
+          this.winner = message.winner;
+          this.opponentId = message.opponentId;
+          this.playerSymbol = message.symbol;
+          this.opponent = message.opponentId !== null || message.opponentId !== undefined;
+          break;
+
+        case "ERROR":
           this.error = message.message;
-          setTimeout(() => { this.error = null; }, 3000);
+          setTimeout(() => {
+            this.error = null;
+          }, 3000);
           break;
 
         default:
-          console.log('Unknown message type:', message.type);
+          console.log("Unknown message type:", message.type);
       }
     },
 
     createGame() {
       this.error = null;
       this.chatMessages = [];
-      this.socket.send(JSON.stringify({
-        type: 'CREATE_GAME',
-        name: this.playerId
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "CREATE_GAME",
+          name: this.playerId,
+        })
+      );
     },
 
     joinGame(gameIdInput) {
       if (!gameIdInput.trim()) {
-        this.error = 'Please enter a Game ID';
+        this.error = "Please enter a Game ID";
         return;
       }
 
       this.error = null;
       this.chatMessages = [];
-      this.socket.send(JSON.stringify({
-        type: 'JOIN_GAME',
-        gameId: gameIdInput.trim(),
-        name: this.playerId.trim()
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "JOIN_GAME",
+          gameId: gameIdInput.trim(),
+          name: this.playerId.trim(),
+        })
+      );
     },
 
     registerPlayer() {
@@ -324,17 +400,33 @@ export default {
         return;
       }
 
+      this.cookies.set("player", this.playerId, "7d");
       this.playerRegistered = true;
       this.error = null;
 
+      // get game refs
+      this.socket.send(
+        JSON.stringify({
+          type: "GAME_REF",
+          playerId: this.playerId,
+        })
+      );
+
       // fetching the game lobby
-      this.socket.send(JSON.stringify({
-        type: "GAME_LOBBY"
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "GAME_LOBBY",
+        })
+      );
     },
 
     makeMove(position) {
-      if (!this.isYourTurn || this.board[position] || this.gameOver || !this.opponent) {
+      if (
+        !this.isYourTurn ||
+        this.board[position] ||
+        this.gameOver ||
+        !this.opponent
+      ) {
         return;
       }
 
@@ -344,19 +436,22 @@ export default {
       if (this.checkWin(this.playerSymbol)) {
         this.gameOver = true;
         this.winner = this.playerSymbol;
-      } else if (this.board.every(cell => cell)) {
+      } else if (this.board.every((cell) => cell)) {
         this.gameOver = true;
         this.winner = null;
       }
 
-      this.socket.send(JSON.stringify({
-        type: 'MOVE_MADE',
-        position,
-        board: this.board,
-        gameOver: this.gameOver,
-        winner: this.winner,
-        name: this.playerId
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "MOVE_MADE",
+          position,
+          board: this.board,
+          gameOver: this.gameOver,
+          winner: this.winner,
+          name: this.playerId,
+          gameId: this.gameId,
+        })
+      );
     },
 
     checkWin(symbol) {
@@ -368,20 +463,22 @@ export default {
         [1, 4, 7],
         [2, 5, 8],
         [0, 4, 8],
-        [2, 4, 6]
+        [2, 4, 6],
       ];
 
-      return winningCombinations.some(combination =>
-        combination.every(index => this.board[index] === symbol)
+      return winningCombinations.some((combination) =>
+        combination.every((index) => this.board[index] === symbol)
       );
     },
 
     resetGame() {
-      this.socket.send(JSON.stringify({
-        type: 'RESET_GAME',
-        name: this.playerId,
-        gameId: this.gameId
-      }));
+      this.socket.send(
+        JSON.stringify({
+          type: "RESET_GAME",
+          name: this.playerId,
+          gameId: this.gameId,
+        })
+      );
     },
 
     sendMessage() {
@@ -392,15 +489,46 @@ export default {
 
       let message = this.chatInput;
       this.chatInput = null;
-      this.socket.send(JSON.stringify({
-        type: "GAME_CHAT",
-        gameId: this.gameId,
-        sender: this.playerId,
-        text: message
-      }));
-    }
-  }
-};
+      this.socket.send(
+        JSON.stringify({
+          type: "GAME_CHAT",
+          gameId: this.gameId,
+          sender: this.playerId,
+          text: message,
+        })
+      );
+    },
+
+    endGame() {
+      this.socket.send(
+        JSON.stringify({
+          type: "END_GAME",
+          playerId: this.playerId,
+          gameId: this.gameId,
+        })
+      );
+
+      this.gameId = null;
+      this.opponentId = null;
+      this.opponent = false;
+      this.error = null;
+
+      // fetching the leaderboard
+      this.socket.send(
+        JSON.stringify({
+          type: "LEADERBOARD",
+        })
+      );
+
+      // fetching the game lobby
+      this.socket.send(
+        JSON.stringify({
+          type: "GAME_LOBBY",
+        })
+      );
+    },
+  },
+});
 </script>
 
 <style scoped>
@@ -425,7 +553,7 @@ h1 {
 
 .btn {
   padding: 12px 20px;
-  background-color: #4CAF50;
+  background-color: #4caf50;
   color: white;
   border: none;
   border-radius: 4px;
@@ -487,7 +615,7 @@ h1 {
 }
 
 .o {
-  color: #2196F3;
+  color: #2196f3;
 }
 
 .game-info {
@@ -522,7 +650,7 @@ h1 {
 }
 
 .leaderboard th {
-  background-color: #4CAF50;
+  background-color: #4caf50;
   color: white;
   font-weight: bold;
 }
@@ -564,7 +692,7 @@ h1 {
 
 .lobby .btn {
   padding: 8px 16px;
-  background-color: #4CAF50;
+  background-color: #4caf50;
   color: white;
   border: none;
   border-radius: 4px;
@@ -640,7 +768,7 @@ h1 {
 
 .chat .btn {
   padding: 10px 20px;
-  background-color: #4CAF50;
+  background-color: #4caf50;
   color: white;
   border: none;
   border-radius: 4px;
@@ -656,5 +784,10 @@ h1 {
 .chat-input,
 .chat .btn {
   margin-bottom: 10px;
+}
+
+.rules {
+  margin: 30px 0;
+  text-align: left;
 }
 </style>
