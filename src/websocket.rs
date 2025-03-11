@@ -225,9 +225,9 @@ impl WasmWebSocket {
         console_log!("Decoding response");
 
         let mut proxy_data = {
-            let envelope = Layer8Envelope::from_json_bytes(resp_bytes.as_bytes()).map_err(|e| {
+            let envelope = Layer8Envelope::from_json_bytes(resp_bytes.as_bytes()).map_err(|_e| {
                 console_log!(&format!(
-                    "Failed to decode response: {e}, Data is :{}",
+                    "Failed to decode response: {_e}, Data is :{}",
                     String::from_utf8_lossy(resp_bytes.as_ref())
                 ));
 
@@ -564,8 +564,8 @@ fn preprocess_on_message(pipeline: Option<Function>) -> Function {
         };
 
         if let Some(pipeline) = pipeline.as_ref() {
-            if let Err(err) = pipeline.call1(&JsValue::NULL, &msg_event) {
-                console_error!(&format!("Failed to call pipeline: {:?}", err));
+            if let Err(_err) = pipeline.call1(&JsValue::NULL, &msg_event) {
+                console_error!(&format!("Failed to call pipeline: {:?}", _err));
             }
         }
     }) as Box<dyn FnMut(MessageEvent)>);

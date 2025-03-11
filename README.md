@@ -5,57 +5,6 @@ This repository contains a Rust implementation of the Layer8 Interceptor. Analog
 At the time of writing this document, it is a 1:1 port of the original implementation.
 The offering for this is a smaller wasm binary size and potentially better performance.
 
-## Usage
-
-### With the We've Got Poems example
-
-### With Experimental Features
-
-To use experimental features, you can use the `--features experimental` flag when building the wasm module.
-
-```sh
-make build-experimental
-```
-
-#### Using websockets
-
-To use websockets, we can use our library as so:
-
-```js
-import { WebSocket } from 'layer8-interceptor-rs'
-
-// code here...
-mounted() {
-    this.socket = new WebSocket();
-    await this.socket.init({
-      url: "example.com",
-      proxy: "l8proxy.com"
-    });
-
-    this.socket.onmessage = (event) => {
-      this.messages.push({ text: event.data, id: Math.random() });
-    };
-
-    this.socket.onopen = () => {
-      console.log('Connected to the WebSocket server');
-    };
-
-    this.socket.onclose = () => {
-      console.log('Disconnected from the WebSocket server');
-    };
-  },
-  methods: {
-    sendMessage() {
-      this.socket.send(this.message);
-      this.message = '';
-    },
-  },
-
-// other code here...
-```
-
-Check the [example](./service_provider_mock/game-arena) for a full example.
-
 ## How To Build
 
 ### Prerequisites
@@ -133,3 +82,50 @@ cargo llvm-cov --workspace --lcov --output-path lcov.info
 ```
 
 The generated `lcov.info` can be used with IDE tools like [coverage gutters](https://marketplace.visualstudio.com/items?itemName=ryanluker.vscode-coverage-gutters) to watch code coverage.
+
+## Usage With Experimental Features
+
+To use experimental features, you can use the `--features experimental` flag when building the wasm module.
+
+```sh
+make build-experimental
+```
+
+### Using websockets
+
+To use websockets, we can use our library as so:
+
+```js
+import { WebSocket } from 'layer8-interceptor-rs'
+
+// code here...
+  async mounted() {
+    this.socket = new WebSocket();
+    await this.socket.init({
+      url: "example.com",
+      proxy: "l8proxy.com"
+    });
+
+    this.socket.onmessage = (event) => {
+      this.messages.push({ text: event.data, id: Math.random() });
+    };
+
+    this.socket.onopen = () => {
+      console.log('Connected to the WebSocket server');
+    };
+
+    this.socket.onclose = () => {
+      console.log('Disconnected from the WebSocket server');
+    };
+  },
+  methods: {
+    sendMessage() {
+      this.socket.send(this.message);
+      this.message = '';
+    },
+  },
+
+// other code here...
+```
+
+Check the [example](./service_provider_mock/tic-tac-toe) for a full example.

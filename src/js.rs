@@ -18,7 +18,6 @@ use crate::js_glue::js_imports::check_if_asset_exists;
 use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 
-#[cfg(debug_assertions)]
 const INTERCEPTOR_VERSION: &str = "0.0.14";
 const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
