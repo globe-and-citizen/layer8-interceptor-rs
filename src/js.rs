@@ -580,7 +580,6 @@ async fn construct_file_data(value: JsValue) -> Result<serde_json::Value, String
 /// Test promise resolution/rejection from the console.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = testWASM)]
-#[cfg(debug_assertions)]
 pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
     if arg.is_null() || arg.is_undefined() {
         return Err(JsError::new("The argument is null or undefined."));
@@ -592,7 +591,6 @@ pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
 /// This function is called to check the persistence of the WASM module.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = persistenceCheck)]
-#[cfg(debug_assertions)]
 pub async fn persistence_check() -> i32 {
     let counter = COUNTER.with(|v| {
         v.set(v.get() + 1);
