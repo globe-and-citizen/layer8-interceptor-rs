@@ -38,7 +38,7 @@ wasm-pack build --target bundler --all-features --release
 ```
 
 > [!NOTE]  
-> If you run into ` cargo:warning=error: unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'` you will need to use a newer version of llvm.
+> If you run into `cargo:warning=error: unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'` you will need to use a newer version of llvm.
 > Please follow the first two steps from the attached documentation to achieve this. [Setup newer llvm/clang.](https://learn.sapio-lang.org/ch01-01-installation.html#local-quickstart)
 
 > [!WARNING]  
@@ -100,7 +100,7 @@ import { WebSocket } from 'layer8-interceptor-rs'
 
 // code here...
   async mounted() {
-    this.socket = new WebSocket();
+    this.socket = new L8WebSocket();
     await this.socket.init({
       url: "example.com",
       proxy: "l8proxy.com"
