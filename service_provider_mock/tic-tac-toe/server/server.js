@@ -12,11 +12,11 @@ const app = express();
 const server = http.createServer(app);
 
 // // Serve static files from 'dist' directory (where Vue.js build will be)
-app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(path.join(__dirname, '../dist')));
 
 // // Fallback to index.html for SPA routing
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist/index.html'));
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 // Initialize WebSocket server
@@ -104,7 +104,7 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         handlePlayerDisconnect(playerId_, gameId_);
-        playerConnections.delete(pid);
+        playerConnections.delete(playerId_);
         console.log('Client disconnected');
     });
 
