@@ -1,5 +1,5 @@
 [package]
-name = "layer8-interceptor-rs"                                             
+name = "layer8-interceptor-rs"
 version = "0.0.13"
 edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
@@ -41,11 +41,8 @@ reqwest = "0.12"
 js-sys = "0.3"
 serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["js"] }
-layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "main" } # TODO: point to crate version once published
 tokio = { version = "1", optional = true, features = ["sync"] }
-
-[dev-dependencies]
-layer8-tungstenite = { git = "https://github.com/globe-and-citizen/layer8-tungstenite.git", branch = "master" }
+layer8-primitives = "0.1.2"
 
 [features]
 default = ["experimental"]
