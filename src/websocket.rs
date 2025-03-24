@@ -8,18 +8,22 @@ use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
-    crypto::{generate_key_pair, jwk_from_map, KeyUse},
+    crypto::{self, generate_key_pair, jwk_from_map, KeyUse},
     types::{Layer8Envelope, WebSocketMetadata, WebSocketPayload},
 };
 
-use crate::{
-    js::{rebuild_url, ENCRYPTED_TUNNEL_FLAG, PRIVATE_JWK_ECDH, UP_JWT, USER_SYMMETRIC_KEY, UUID},
-    js_imports_prelude::*,
-};
+use crate::{js::rebuild_url, js_imports_prelude::*};
 
 thread_local! {
     // This static variable will help us keep track of our websocket wrapper.
     static LAYER8_SOCKETS: RefCell<HashMap<String, WasmWebSocket>> = RefCell::new(HashMap::new());
+
+    static WS_PUB_JWK_ECDH:  RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
+    static WS_PRIVATE_JWK_ECDH: RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
+    static WS_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
+    static WS_UP_JWT: RefCell<String> = const { RefCell::new(String::new()) };
+    static WS_ENCRYPTED_TUNNEL_FLAG: RefCell<bool> = const { RefCell::new(false) };
+    static WS_UUID: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
 }
 
 /// The configuration object for the WebSocket.
@@ -137,8 +141,8 @@ impl WasmWebSocket {
         }
 
         let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(KeyUse::Ecdh)?;
-        PRIVATE_JWK_ECDH.with(|v| {
-            v.set(Some(private_jwk_ecdh.clone()));
+        WS_PRIVATE_JWK_ECDH.with_borrow_mut(|v| {
+            v.replace(private_jwk_ecdh.clone());
         });
 
         let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
@@ -182,7 +186,9 @@ impl WasmWebSocket {
 
             // fixme: should be reusable for other operations
             let uuid = Uuid::new_v4().to_string();
-            UUID.set(uuid.clone());
+            WS_UUID.with_borrow_mut(|val| {
+                val.insert(rebuilt_url.clone(), uuid.clone());
+            });
 
             // sending the public key
             let payload = Layer8Envelope::WebSocket(WebSocketPayload {
@@ -246,12 +252,12 @@ impl WasmWebSocket {
             }
         };
 
-        UP_JWT.set(proxy_data.remove("up-JWT").ok_or("up_jwt not found")?.as_str().unwrap().to_string());
+        WS_UP_JWT.set(proxy_data.remove("up-JWT").ok_or("up_jwt not found")?.as_str().unwrap().to_string());
 
         let shared_key = private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?;
-        USER_SYMMETRIC_KEY.set(Some(shared_key.clone()));
-        ENCRYPTED_TUNNEL_FLAG.set(true);
 
+        WS_USER_SYMMETRIC_KEY.set(Some(shared_key.clone()));
+        WS_ENCRYPTED_TUNNEL_FLAG.set(true);
         LAYER8_SOCKETS.with_borrow_mut(|val| {
             val.insert(rebuilt_url.clone(), WasmWebSocket { socket });
         });
@@ -468,7 +474,7 @@ impl WasmWebSocketRef {
     pub fn send(&self, data: JsValue) -> Result<(), JsValue> {
         console_log!(&format!("Sending data: {:?}", data));
 
-        let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
+        let symmetric_key = match WS_USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,
             None => return Err(JsValue::from_str("Symmetric key not found")),
         };
@@ -516,7 +522,7 @@ impl WasmWebSocketRef {
 // this block decrypts the incoming message before passing it to the client.
 fn preprocess_on_message(pipeline: Option<Function>) -> Function {
     let decrypt_callback = Closure::wrap(Box::new(move |message: MessageEvent| {
-        let symmetric_key = match USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
+        let symmetric_key = match WS_USER_SYMMETRIC_KEY.with_borrow(|v| v.clone()) {
             Some(v) => v,
             None => {
                 console_log!("Symmetric key not found");
