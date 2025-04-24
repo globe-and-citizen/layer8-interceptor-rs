@@ -17,7 +17,6 @@ use crate::{js::rebuild_url, js_imports_prelude::*};
 thread_local! {
     // This static variable will help us keep track of our websocket wrapper.
     static LAYER8_SOCKETS: RefCell<HashMap<String, WasmWebSocket>> = RefCell::new(HashMap::new());
-
     static WS_PUB_JWK_ECDH:  RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
     static WS_PRIVATE_JWK_ECDH: RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
     static WS_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
@@ -434,7 +433,7 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        WasmWebSocketRef::default()
+        Self::default()
     }
 
     /// The options object is expected to have the following structure:

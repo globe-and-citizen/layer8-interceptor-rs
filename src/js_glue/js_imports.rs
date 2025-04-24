@@ -48,6 +48,12 @@ extern "C" {
     pub async fn get_storage_estimate() -> Result<JsValue, JsValue>;
 }
 
+#[wasm_bindgen(module = "/src/js_glue/formdata_polyfill.ts")]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = parseFormDataToArray)]
+    pub async fn parse_form_data_to_array(form_data: web_sys::FormData, boundary: String) -> Result<JsValue, JsValue>;
+}
+
 #[macro_export]
 #[cfg(not(debug_assertions))]
 macro_rules! console_log {

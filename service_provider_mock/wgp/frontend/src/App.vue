@@ -1,10 +1,10 @@
 <script setup>
 import { RouterView } from "vue-router";
 import { initEncryptedTunnel } from 'layer8-interceptor-rs'
-const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
-const PROXY_URL =  import.meta.env.VITE_PROXY_URL
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
+const PROXY_URL = import.meta.env.VITE_PROXY_URL
 
-try{
+try {
   initEncryptedTunnel({
     providers: [BACKEND_URL],
     proxy: PROXY_URL,
@@ -14,8 +14,8 @@ try{
     ],
     cacheAssetLimit: 5 // if we want to cache assets at a limit of 5 MB
   }, "dev");
-}catch(err){
-  console.log(".initEncryptedTunnel error: ", err)
+} catch (err) {
+  console.error(".initEncryptedTunnel error: ", err)
 }
 </script>
 
@@ -25,5 +25,4 @@ try{
   </div>
 </template>
 
-<style scoped>
-</style>
+<style scoped></style>

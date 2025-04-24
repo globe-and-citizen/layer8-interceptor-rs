@@ -2,9 +2,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
-import { fetch , _static } from 'layer8-interceptor-rs'
- 
-const BACKEND_URL =  import.meta.env.VITE_BACKEND_URL
+import { fetch, _static } from 'layer8-interceptor-rs'
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
 const router = useRouter();
 const SpToken = ref(localStorage.getItem("SP_TOKEN") || null);
 const L8Token = ref(localStorage.getItem("L8_TOKEN") || null);
@@ -32,7 +32,7 @@ const metaData = computed(() => {
 
 const getPoem = async () => {
   try {
-    const resp = await fetch( BACKEND_URL + "/nextpoem");
+    const resp = await fetch(BACKEND_URL + "/nextpoem");
     let poemObj = await resp.json();
 
     if (poemObj.title) {
@@ -52,7 +52,7 @@ const logoutUser = () => {
   router.push({ name: "loginRegister" });
 };
 
-onMounted(async()=>{
+onMounted(async () => {
   let user = localStorage.getItem("_user") ? JSON.parse(localStorage.getItem("_user")) : null
   console.log(user)
   let url = await _static(user.profile_image);
@@ -68,16 +68,11 @@ onMounted(async()=>{
 <template>
   <div class="h-screen bg-primary flex flex-col">
     <Navbar></Navbar>
-    <div
-      class="bg-primary-content w-full flex justify-center items-center p-4 flex-1"
-    >
-      <div
-        class="card w-auto bg-base-100 shadow-xl p-8 h-min prose"
-        v-if="isLoggedIn"
-      >
+    <div class="bg-primary-content w-full flex justify-center items-center p-4 flex-1">
+      <div class="card w-auto bg-base-100 shadow-xl p-8 h-min prose" v-if="isLoggedIn">
         <h1>Welcome {{ userName }}!</h1>
         <!-- <div v-if="user?.profile_image"> -->
-         <div> 
+        <div>
           <img id="pictureBox">
         </div>
         <h3>Your MetaData:</h3>
