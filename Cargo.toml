@@ -42,9 +42,7 @@ js-sys = "0.3"
 serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["js"] }
 tokio = { version = "1", optional = true, features = ["sync"] }
-
-# TODO: update once <https://github.com/globe-and-citizen/layer8-primitives-rs/pull/15> and next version has been released
-layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "upd/split-metadata-from-header" }
+layer8-primitives = "0.2"
 
 [features]
 default = ["experimental"]

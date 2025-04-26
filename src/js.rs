@@ -332,7 +332,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             x if x.is_instance_of::<Uint8Array>() => req.body = x.dyn_into::<Uint8Array>().unwrap_throw().to_vec(),
 
             x if x.is_instance_of::<FormData>() => {
-                let boundary = format!("---------------------------{}", Uuid::new_v4().to_string());
+                let boundary = format!("---------------------------{}", Uuid::new_v4());
 
                 // we expect it to be Uint8Array
                 let val = parse_form_data_to_array(x.dyn_into::<FormData>().unwrap_throw(), boundary.clone())
