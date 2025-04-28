@@ -1,6 +1,6 @@
 <script setup>
 // Imports
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, } from "vue";
 import Navbar from "../components/Navbar.vue";
 import { useRouter } from "vue-router";
 import { fetch, _static } from 'layer8-interceptor-rs'
@@ -20,8 +20,21 @@ const SpToken = ref(localStorage.getItem("SP_TOKEN") || null);
 const user = ref(JSON.parse(localStorage.getItem("_user")) || null); // ref(localStorage.getItem("_user") || null ) //?
 const isLoading = ref(false);
 
+const userProfileSrc = computed(() => {
+  let val = user?.value.profile_image;
+  if (val) {
+    _static(user.value.profile_image).then((url) => {
+      const element = document.getElementById("userProfileSrc");
+      element.src = url;
+      console.log("User profile image URL: ", url);
+    }).catch((err) => {
+      console.log("Error in getting user profile image: ", err);
+    });
+  }
 
-// Functions
+  return val
+});
+
 const registerUser = async () => {
   try {
     console.log("username is: ", registerUsername.value)
@@ -207,8 +220,9 @@ const uploadProfilePicture = async (e) => {
         <h1 class="text-dark pb-4 font-bold">
           Welcome {{ user?.email }}!
         </h1>
-        <div v-if="user?.profile_image">
-          <img :src="user?.profile_image" />
+
+        <div v-if="userProfileSrc">
+          <img id="userProfileSrc" />
           <br />
           <hr />
           <br />

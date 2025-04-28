@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE as base64_enc_dec};
 use js_sys::{ArrayBuffer, Function, Uint8Array};
 use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
@@ -8,8 +8,8 @@ use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
-    crypto::{self, generate_key_pair, jwk_from_map, KeyUse},
-    types::{Layer8Envelope, WebSocketMetadata, WebSocketPayload},
+    crypto::{self, KeyUse, generate_key_pair, jwk_from_map},
+    types::{Layer8Envelope, WebSocketPayload},
 };
 
 use crate::{js::rebuild_url, js_imports_prelude::*};
@@ -478,11 +478,15 @@ impl WasmWebSocketRef {
             None => return Err(JsValue::from_str("Symmetric key not found")),
         };
 
+        let client_uuid = WS_UUID
+            .with_borrow(|v| v.get(&rebuild_url(&self.0)).cloned())
+            .ok_or(JsValue::from("could not find a client_uuid for the provided id"))?;
+
         let mut ws_exchange = WebSocketPayload {
-            metadata: serde_json::to_value(&WebSocketMetadata {
-                backend_url: self.0.to_string(),
-            })
-            .expect_throw("the value is json serializable"),
+            metadata: json!({
+                "backend_url": self.0.to_string(),
+                "x-client-uuid": client_uuid,
+            }),
             payload: None,
         };
 

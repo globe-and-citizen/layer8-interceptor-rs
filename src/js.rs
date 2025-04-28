@@ -9,11 +9,11 @@ use web_sys::{Blob, FileReaderSync, FormData, Response, ResponseInit};
 
 use crate::js_glue::js_imports::{check_if_asset_exists, parse_form_data_to_array};
 use crate::js_imports_prelude::*;
-use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
+use crate::types::{CACHE_STORAGE_LIMIT, DbCache, InitConfig, Uniqueness};
 use layer8_primitives::{
     compression::decompress_data_gzip,
     crypto::{self, generate_key_pair, jwk_from_map},
-    types::{self, new_client},
+    types::{self, Request, new_client},
 };
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
@@ -78,13 +78,16 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         }
     };
 
+    if !HTTP_ENCRYPTED_TUNNEL_FLAG.get() {
+        return Err(JsError::new("Encrypted tunnel is closed. Reload page."));
+    }
+
     let static_paths = STATIC_PATHS.with(|v| {
         let val = v.take();
         v.replace(val.clone());
         val
     });
 
-    let json_body = format!("{{\"__url_path\": \"{}\"}}", url);
     let req_url = rebuild_url(&url);
 
     let client = L8_CLIENTS.with_borrow(|v| v.get(&req_url).cloned());
@@ -101,12 +104,11 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
     let req_metadata = types::RequestMetadata {
         method: "GET".to_string(),
-        headers: HashMap::from([("content-type".to_string(), "application/json".to_string())]),
-        url_path: Some(assets_glob_url.clone()),
-    };
-
-    let req = types::Request {
-        body: json_body.as_bytes().to_vec(),
+        headers: HashMap::from([
+            ("content-type".to_string(), "application/json".to_string()),
+            ("layer8-empty-body".to_string(), "true".to_string()),
+        ]),
+        url_path: Some(url.clone()),
     };
 
     let symmetric_key = {
@@ -138,17 +140,17 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
         let res = client
             .expect_throw("client could not be found. This is likely due to the encrypted tunnel not being established correctly.")
-            .r#do((&req, &req_metadata), &symmetric_key, &req_url, true, &up_jwt, &uuid)
+            .r#do((&Request::default(), &req_metadata), &symmetric_key, &req_url, true, &up_jwt, &uuid)
             .await;
+
         match res {
-            Ok(val) => val,
+            Ok(val) => {
+                console_log!("File fetched successfully");
+                console_log!(&format!("Response: {:?}", val));
+                val
+            }
             Err(e) => {
-                console_log!(&format!(
-                    "Failed to fetch: {}\nWith request {:?}\nWith headers {:?}",
-                    e,
-                    String::from_utf8_lossy(&req.body),
-                    req_metadata.headers
-                ));
+                console_log!(&format!("Failed to fetch: {}\nWith request metadata {:?}", e, req_metadata));
                 return Err(JsError::new(&e));
             }
         }
@@ -260,6 +262,10 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
                 }
                 "body" => {
                     js_body = value;
+                    if !js_body.is_null() && !js_body.is_undefined() {
+                        req_metadata.headers.insert("layer8-empty-body".to_string(), "true".to_string());
+                    }
+
                     if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
                         req_metadata.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
                     }
@@ -399,7 +405,10 @@ pub async fn test_wasm(arg: JsValue) -> Result<String, JsError> {
         return Err(JsError::new("The argument is null or undefined."));
     }
 
-    Ok(format!("WASM Interceptor version {INTERCEPTOR_VERSION} successfully loaded. Argument passed: {:?}. To test promise rejection, call with no argument.", arg))
+    Ok(format!(
+        "WASM Interceptor version {INTERCEPTOR_VERSION} successfully loaded. Argument passed: {:?}. To test promise rejection, call with no argument.",
+        arg
+    ))
 }
 
 /// This function is called to check the persistence of the WASM module.

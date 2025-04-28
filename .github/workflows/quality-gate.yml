@@ -51,7 +51,7 @@ jobs:
           - run: cargo clippy --tests --all-features --all-targets -- -D clippy::all
             
     cargo-doc:
-        runs-on: ubuntu--latest
+        runs-on: ubuntu-latest
         steps:
           - uses: actions/checkout@v4
           - name: run cargo doc
