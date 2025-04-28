@@ -1,4 +1,4 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE as base64_enc_dec};
+use base64::{engine::general_purpose::URL_SAFE as base64_enc_dec, Engine as _};
 use js_sys::{ArrayBuffer, Function, Uint8Array};
 use serde_json::json;
 use std::{cell::RefCell, collections::HashMap};
@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEventInit, WebSocket as BrowserWebSocket};
 
 use layer8_primitives::{
-    crypto::{self, KeyUse, generate_key_pair, jwk_from_map},
+    crypto::{self, generate_key_pair, jwk_from_map, KeyUse},
     types::{Layer8Envelope, WebSocketPayload},
 };
 

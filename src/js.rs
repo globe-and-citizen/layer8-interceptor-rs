@@ -9,11 +9,11 @@ use web_sys::{Blob, FileReaderSync, FormData, Response, ResponseInit};
 
 use crate::js_glue::js_imports::{check_if_asset_exists, parse_form_data_to_array};
 use crate::js_imports_prelude::*;
-use crate::types::{CACHE_STORAGE_LIMIT, DbCache, InitConfig, Uniqueness};
+use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
 use layer8_primitives::{
     compression::decompress_data_gzip,
     crypto::{self, generate_key_pair, jwk_from_map},
-    types::{self, Request, new_client},
+    types::{self, new_client, Request},
 };
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
