@@ -1,7 +1,7 @@
 [package]
 name = "layer8-interceptor-rs"
 version = "0.0.16"
-edition = "2024"
+edition = "2021"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
 repository = "github.com/muse254/layer8-interceptor-rs"
