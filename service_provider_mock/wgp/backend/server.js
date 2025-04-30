@@ -4,20 +4,16 @@ const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt')
 const app = express()
 const { poems, users } = require('./mock-database.js')
-// TODO: For future, use a layer8 npm published package for initialising the client and variables
 const popsicle = require('popsicle')
 const ClientOAuth2 = require('client-oauth2')
-const layer8_middleware_rs = require('layer8-middleware-rs')
 const { use } = require('bcrypt/promises.js')
+const fileUpload = require('express-fileupload');
 require('dotenv').config()
 
 const SECRET_KEY = 'my_very_secret_key'
 const port = process.env.PORT
 const FRONTEND_URL = process.env.FRONTEND_URL
 const LAYER8_URL = process.env.LAYER8_URL
-// const port = 8000;
-// const FRONTEND_URL = "http://localhost:5173"
-// const LAYER8_URL = "http://localhost:5001"
 const LAYER8_CALLBACK_URL = `${FRONTEND_URL}/oauth2/callback`
 const LAYER8_RESOURCE_URL = `${LAYER8_URL}/api/user`
 
@@ -30,8 +26,12 @@ const layer8Auth = new ClientOAuth2({
   scopes: ['read:user']
 })
 
-const upload = layer8_middleware_rs.multipart({
-  dest: 'pictures/dynamic'
+// request recorder
+app.use((req, _, next) => {
+  console.log(`Request Method: ${req.method}`)
+  console.log(`Request URL: ${req.url}`)
+  console.log('Request Headers: ', req.headers)
+  next()
 })
 
 app.get('/healthcheck', (req, res) => {
@@ -46,21 +46,21 @@ app.get('/', (req, res) => {
   res.json({ message: 'Hello there!' })
 })
 
-app.use(layer8_middleware_rs.tunnel)
 
 app.use(cors())
-app.use('/media', layer8_middleware_rs.static('pictures'))
+
+app.use(fileUpload({
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+}));
+
+// app.use('/media', layer8_middleware_rs.static('pictures'))
+app.use('/media', express.static('pictures'))
+
 app.use('/test', (req, res) => {
   res.status(200).json({ message: 'Test endpoint' })
 })
 
 app.post('/', (req, res) => {
-  console.log('Endpoint for testing')
-  console.log('headers: ', req.headers)
-  console.log('Resp headers: ', res.getHeaderNames())
-  console.log('Give headers: ', res.headers)
-  console.log('Resp body', res.body)
-  console.log('req.body: ', req.body)
   res.setHeader('x-header-test', '1234')
   res.send('Server has registered a POST.')
 })
@@ -74,7 +74,8 @@ app.get('/nextpoem', (req, res) => {
 })
 
 app.post('/api/register', async (req, res) => {
-  const { password, email, profile_image } = JSON.parse(req.body)
+  const { password, email, profile_image } = req.body
+  console.log('Registering user: ', email)
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10)
@@ -90,7 +91,8 @@ app.post('/api/login', async (req, res) => {
   console.log('headers: ', res.getHeaderNames())
   console.log('users: ', users)
   console.log('data: ', req.body)
-  const { email, password } = JSON.parse(req.body)
+  const { email, password } = req.body;
+
   const user = users.find(u => u.email === email)
   if (user && (await bcrypt.compare(password, user.password))) {
     const token = jwt.sign({ email }, SECRET_KEY)
@@ -107,7 +109,7 @@ app.get('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/login/layer8/auth', async (req, res) => {
-  const { callback_url } = JSON.parse(req.body)
+  const { callback_url } = req.body
   const user = await layer8Auth.code
     .getToken(callback_url)
     .then(async user => {
@@ -171,17 +173,23 @@ app.post('/api/login/layer8/auth', async (req, res) => {
 })
 
 app.post('/api/profile/upload', (req, res) => {
-  upload.single("file")(req, res)
-
-  const uploadedFile = req.file
+  const uploadedFile = req.files?.file
 
   if (!uploadedFile) {
     return res.status(400).json({ error: 'No file uploaded' })
   }
 
+  // we need to upload the file to the server
+  uploadedFile.mv(`./pictures/dynamic/${uploadedFile.name}`, err => {
+    if (err) {
+      console.error('Error moving file: ', err)
+      return res.status(500).json({ error: 'Failed to upload file' })
+    }
+  })
+
   res.status(200).json({
     message: 'File uploaded successfully!',
-    url: `${req.protocol}://${req.get('host')}/media/dynamic/${req.file?.name}`
+    url: `${req.protocol}://${req.get('host')}/media/dynamic/${uploadedFile.name}`
   })
 })
 

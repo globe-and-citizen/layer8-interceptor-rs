@@ -9,7 +9,7 @@ use web_sys::{BinaryType, Blob, Event, FileReaderSync, MessageEvent, MessageEven
 
 use layer8_primitives::{
     crypto::{self, generate_key_pair, jwk_from_map, KeyUse},
-    types::{Layer8Envelope, WebSocketMetadata, WebSocketPayload},
+    types::{Layer8Envelope, WebSocketPayload},
 };
 
 use crate::{js::rebuild_url, js_imports_prelude::*};
@@ -17,7 +17,6 @@ use crate::{js::rebuild_url, js_imports_prelude::*};
 thread_local! {
     // This static variable will help us keep track of our websocket wrapper.
     static LAYER8_SOCKETS: RefCell<HashMap<String, WasmWebSocket>> = RefCell::new(HashMap::new());
-
     static WS_PUB_JWK_ECDH:  RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
     static WS_PRIVATE_JWK_ECDH: RefCell<Option<crypto::Jwk>> = const { RefCell::new(None) };
     static WS_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
@@ -434,7 +433,7 @@ impl WasmWebSocketRef {
     #[allow(dead_code, reason = "This is for API compatibility with the browser's WebSocket API.")]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        WasmWebSocketRef::default()
+        Self::default()
     }
 
     /// The options object is expected to have the following structure:
@@ -479,11 +478,15 @@ impl WasmWebSocketRef {
             None => return Err(JsValue::from_str("Symmetric key not found")),
         };
 
+        let client_uuid = WS_UUID
+            .with_borrow(|v| v.get(&rebuild_url(&self.0)).cloned())
+            .ok_or(JsValue::from("could not find a client_uuid for the provided id"))?;
+
         let mut ws_exchange = WebSocketPayload {
-            metadata: serde_json::to_value(&WebSocketMetadata {
-                backend_url: self.0.to_string(),
-            })
-            .expect_throw("the value is json serializable"),
+            metadata: json!({
+                "backend_url": self.0.to_string(),
+                "x-client-uuid": client_uuid,
+            }),
             payload: None,
         };
 

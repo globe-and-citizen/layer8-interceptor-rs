@@ -23,8 +23,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.21.0",
+    "express-fileupload": "^1.5.1",
     "jsonwebtoken": "^9.0.2",
-    "layer8-middleware-rs": "^0.1.21",
     "popsicle": "^12.1.2"
   },
   "devDependencies": {

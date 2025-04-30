@@ -9,7 +9,7 @@ const totalTimeSpent = ref(0);
 const numberOfRequest = ref(0)
 
 console.log("verdict 1: ", checkEncryptedTunnel())
-setTimeout(()=>{
+setTimeout(() => {
   console.log("verdict 2: ", checkEncryptedTunnel())
 }, 1000)
 
@@ -27,7 +27,7 @@ async function testWASMHandler() {
   console.log("Total time spent: ", totalTimeSpent.value, "ms")
 }
 
-async function getError(){
+async function getError() {
   try {
     console.log("Error Test")
     await fetch(BACKEND_URL + "/error", {
@@ -52,6 +52,7 @@ async function getNextPicture() {
     BACKEND_URL + '/media/girl.png'
   ]
   let url = await _static(pictureURLs[idx]);
+  console.log("Using URL for image: ", url)
   const element = document.getElementById("pictureBox");
   element.src = url;
   x++
@@ -74,7 +75,7 @@ async function getNextPicture() {
 
       <div>
         Total time spent: {{ totalTimeSpent }} ms
-      </div> 
+      </div>
 
       <div>
         <button @click="getError"> Get Error from "/error"</button>
