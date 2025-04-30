@@ -1,7 +1,7 @@
 use std::{cell::Cell, cell::RefCell, collections::HashMap};
 
 use js_sys::{ArrayBuffer, Object, Uint8Array};
-use reqwest::header::HeaderValue;
+use reqwest::header::{self, HeaderValue};
 use url::Url;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -254,18 +254,18 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
 
                     headers.iter().for_each(|header| {
                         let header_entries = js_sys::Array::from(&header);
-                        req_metadata.headers.insert(
-                            header_entries.get(0).as_string().expect_throw("key is a string; qed"),
-                            header_entries.get(1).as_string().expect_throw("value is a string; qed"),
-                        );
+                        let header_name = header_entries.get(0).as_string().expect_throw("key is a string; qed");
+                        if header_name.trim().eq_ignore_ascii_case("content-length") {
+                            return;
+                        }
+
+                        req_metadata
+                            .headers
+                            .insert(header_name, header_entries.get(1).as_string().expect_throw("value is a string; qed"));
                     });
                 }
                 "body" => {
                     js_body = value;
-                    if !js_body.is_null() && !js_body.is_undefined() {
-                        req_metadata.headers.insert("layer8-empty-body".to_string(), "true".to_string());
-                    }
-
                     if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
                         req_metadata.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
                     }
@@ -275,7 +275,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
         }
 
         // if content type is not provided, we default to "application/json"
-        if !req_metadata.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("Content-Type")) {
+        if !req_metadata.headers.iter().any(|(k, _)| k.trim().eq_ignore_ascii_case("Content-Type")) {
             req_metadata.headers.insert("Content-Type".to_string(), "application/json".to_string());
         }
     }
@@ -359,6 +359,10 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
                 return Err(JsError::new("Unsupported data type"));
             }
         }
+    }
+
+    if req.body.is_empty() {
+        req_metadata.headers.insert("layer8-empty-body".to_string(), "true".to_string());
     }
 
     req_metadata.url_path = Some(url.clone());
