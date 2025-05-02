@@ -266,10 +266,6 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
                 }
                 "body" => {
                     js_body = value;
-                    if !js_body.is_null() && !js_body.is_undefined() {
-                        req_metadata.headers.insert("layer8-empty-body".to_string(), "true".to_string());
-                    }
-
                     if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
                         req_metadata.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
                     }
