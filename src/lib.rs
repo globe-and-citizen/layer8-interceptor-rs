@@ -2,6 +2,7 @@ pub mod js;
 #[cfg(feature = "websocket")]
 pub mod websocket;
 
+pub(crate) mod health_check;
 pub(crate) mod js_glue;
 pub(crate) mod types;
 pub(crate) mod js_imports_prelude {

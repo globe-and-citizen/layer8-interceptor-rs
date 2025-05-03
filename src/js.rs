@@ -7,6 +7,7 @@ use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use web_sys::{Blob, FileReaderSync, FormData, Response, ResponseInit};
 
+use crate::health_check::health_check;
 use crate::js_glue::js_imports::{check_if_asset_exists, parse_form_data_to_array};
 use crate::js_imports_prelude::*;
 use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
@@ -26,10 +27,13 @@ thread_local! {
     static HTTP_PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
     static HTTP_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
     static HTTP_UP_JWT: RefCell<String> = RefCell::new("".to_string());
-    static HTTP_ENCRYPTED_TUNNEL_FLAG: Cell<bool> = const { Cell::new(false) };
+    static HTTP_ENCRYPTED_TUNNEL_FLAG: RefCell<bool> = const { RefCell::new(false) };
     static HTTP_UUID: RefCell<HashMap<String,String>> = RefCell::new(HashMap::new());
     static COUNTER: RefCell<i32> = const { RefCell::new(0) };
     static STATIC_PATHS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    // We are using a map though we expect the user to use only a single provider, work on extending this to multiple
+    // providers is sometime in the future.
     static L8_CLIENTS: RefCell<HashMap<String, types::Client>> = RefCell::new(HashMap::new());
 
     /// The cache instantiates with the `_layer8cache` IndexedDB.
@@ -78,9 +82,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         }
     };
 
-    if !HTTP_ENCRYPTED_TUNNEL_FLAG.get() {
-        return Err(JsError::new("Encrypted tunnel is closed. Reload page."));
-    }
+    assert_tunnel_is_open(&rebuild_url(&url)).await?;
 
     let static_paths = STATIC_PATHS.with(|v| {
         let val = v.take();
@@ -210,15 +212,13 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
 pub async fn check_encrypted_tunnel() -> bool {
-    HTTP_ENCRYPTED_TUNNEL_FLAG.get()
+    HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v)
 }
 
 /// This function is an override of the fetch function. It's arguments are a URL and an options object.
 #[wasm_bindgen]
 pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
-    if !HTTP_ENCRYPTED_TUNNEL_FLAG.get() {
-        return Err(JsError::new("Encrypted tunnel is closed. Reload page."));
-    }
+    assert_tunnel_is_open(&rebuild_url(&url)).await?;
 
     let mut req_metadata = types::RequestMetadata {
         method: "GET".to_string(),
@@ -581,4 +581,37 @@ pub(crate) fn rebuild_url(url: &str) -> String {
         Some(port) => format!("{}:{}", rebuilt_url, port),
         None => rebuilt_url,
     }
+}
+
+async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
+    let tunnel_flag = HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v);
+    if tunnel_flag {
+        return Ok(());
+    }
+
+    let proxy_url = {
+        let proxy = L8_CLIENTS.with_borrow(|v| {
+            v.get(provider_url)
+                .cloned()
+                .ok_or(JsError::new(&format!("Client not found for provider: {}", provider_url)))
+        })?;
+
+        proxy.get_url().to_string()
+    };
+
+    health_check(&rebuild_url(provider_url), &proxy_url).await?;
+
+    init_tunnel(provider_url, &proxy_url).await.map_err(|e| {
+        console_error!(&format!(
+            "Failed to establish encrypted tunnel with provider: {}. Error: {}",
+            provider_url, e
+        ));
+        JsError::new(&e)
+    })?;
+
+    HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow_mut(|v| {
+        *v = true;
+    });
+
+    Ok(())
 }
