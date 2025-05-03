@@ -1,7 +1,5 @@
-use std::time::Duration;
-
 use url::Url;
-use wasm_bindgen::JsError;
+use wasm_bindgen::{JsError, UnwrapThrowExt};
 
 // This the default retry offset in seconds.
 static RETRY_OFFSET: u64 = 2;
@@ -25,7 +23,7 @@ pub enum TransportError {
 impl From<reqwest::Response> for TransportError {
     fn from(value: reqwest::Response) -> Self {
         match value.status() {
-            http::StatusCode::SERVICE_UNAVAILABLE => {
+            reqwest::StatusCode::SERVICE_UNAVAILABLE => {
                 // 503 Service Unavailable sometimes provides a retry-After header, which indicates how long the client should wait before retrying.
                 let retry_after = value
                     .headers()
@@ -37,7 +35,7 @@ impl From<reqwest::Response> for TransportError {
             }
 
             // Other transient errors
-            http::StatusCode::TOO_MANY_REQUESTS | http::StatusCode::REQUEST_TIMEOUT => TransportError::Transient { retry_after: None },
+            reqwest::StatusCode::TOO_MANY_REQUESTS | reqwest::StatusCode::REQUEST_TIMEOUT => TransportError::Transient { retry_after: None },
 
             // all other 5xx errors are considered fatal
             x if x.as_u16() >= 500 => TransportError::Fatal,
@@ -79,14 +77,14 @@ pub async fn health_check(provider_url: &str, proxy_url: &str) -> Result<(), JsE
                             )));
                         }
 
-                        tokio::time::sleep(Duration::from_secs(retry_after)).await;
+                        sleep(retry_after as i32).await?;
                     }
                     None => {
                         retries += 1;
 
                         // Each time we increase the exponential backoff by 2 seconds
                         // e.g. 2, 4, 8
-                        tokio::time::sleep(std::time::Duration::from_secs(RETRY_OFFSET ^ retries)).await;
+                        sleep((RETRY_OFFSET ^ retries) as i32).await?;
                     }
                 }
             }
@@ -100,6 +98,25 @@ pub async fn health_check(provider_url: &str, proxy_url: &str) -> Result<(), JsE
             TransportError::None => break,
         }
     }
+
+    Ok(())
+}
+
+async fn sleep(delay_in_seconds: i32) -> Result<(), JsError> {
+    let delay_in_millis = delay_in_seconds * 1000;
+
+    let mut cb = |resolve: js_sys::Function, _: js_sys::Function| {
+        web_sys::window()
+            .unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, delay_in_millis)
+            .expect_throw("Failed to set timeout");
+    };
+
+    let p = js_sys::Promise::new(&mut cb);
+
+    wasm_bindgen_futures::JsFuture::from(p)
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to set timeout: {:?}", e.as_string())))?;
 
     Ok(())
 }
