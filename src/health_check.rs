@@ -36,6 +36,9 @@ impl From<reqwest::Response> for TransportError {
                 TransportError::Transient { retry_after }
             }
 
+            // Other transient errors
+            http::StatusCode::TOO_MANY_REQUESTS | http::StatusCode::REQUEST_TIMEOUT => TransportError::Transient { retry_after: None },
+
             // all other 5xx errors are considered fatal
             x if x.as_u16() >= 500 => TransportError::Fatal,
 
