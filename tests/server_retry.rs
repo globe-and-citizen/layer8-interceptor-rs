@@ -6,6 +6,8 @@ use layer8_interceptor_rs::health_check::health_check;
 #[allow(dead_code)]
 static PORT: &str = "9999";
 
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 #[allow(dead_code)]
 #[wasm_bindgen_test]
 async fn server_status_ok() {

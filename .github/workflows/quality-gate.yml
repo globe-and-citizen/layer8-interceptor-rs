@@ -86,4 +86,6 @@ jobs:
           - name: Check with with features
             run: cargo check --verbose --all-features
           - name: Run tests with features
-            run: cargo test --verbose --all-features
+            run: |
+              cargo test --verbose --all-features
+              cd tests && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless)
