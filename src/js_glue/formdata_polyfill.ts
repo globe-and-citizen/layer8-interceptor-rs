@@ -7,7 +7,7 @@
  * @license https://github.com/nodejs/undici/blob/e39a6324c4474c6614cac98b8668e3d036aa6b18/LICENSE
  * @see {@link https://github.com/nodejs/undici/blob/e39a6324c4474c6614cac98b8668e3d036aa6b18/lib/fetch/body.js#L31}
  */
-async function extractBody(object: FormData, boundary: String) {
+async function extractBody(inputFormData: FormData, boundary: String) {
     const prefix = `--${boundary}\r\nContent-Disposition: form-data`;
 
     /*! formdata-polyfill. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> */
@@ -20,7 +20,7 @@ async function extractBody(object: FormData, boundary: String) {
     let length: (number | null) = 0;
     let hasUnknownSizeValue = false;
 
-    for (const [name, value] of object) {
+    for (const [name, value] of inputFormData) {
         if (typeof value === 'string') {
             // console.log("String value: ", value);
             const chunk = enc.encode(

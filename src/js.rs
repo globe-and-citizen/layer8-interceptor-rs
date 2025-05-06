@@ -10,11 +10,11 @@ use web_sys::{Blob, FileReaderSync, FormData, Response, ResponseInit};
 use crate::health_check::health_check;
 use crate::js_glue::js_imports::{check_if_asset_exists, parse_form_data_to_array};
 use crate::js_imports_prelude::*;
-use crate::types::{DbCache, InitConfig, Uniqueness, CACHE_STORAGE_LIMIT};
+use crate::types::{CACHE_STORAGE_LIMIT, DbCache, InitConfig, Uniqueness};
 use layer8_primitives::{
     compression::decompress_data_gzip,
     crypto::{self, generate_key_pair, jwk_from_map},
-    types::{self, new_client, Request},
+    types::{self, Request, new_client},
 };
 
 const INTERCEPTOR_VERSION: &str = "0.0.14";
@@ -599,7 +599,7 @@ async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
         proxy.get_url().to_string()
     };
 
-    health_check(&rebuild_url(provider_url), &proxy_url).await?;
+    health_check(&rebuild_url(provider_url), &proxy_url, None).await?;
 
     init_tunnel(provider_url, &proxy_url).await.map_err(|e| {
         console_error!(&format!(

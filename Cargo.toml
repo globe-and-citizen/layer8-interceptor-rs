@@ -1,7 +1,7 @@
 [package]
 name = "layer8-interceptor-rs"
 version = "0.1.2"
-edition = "2021"
+edition = "2024"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
 repository = "github.com/muse254/layer8-interceptor-rs"
@@ -17,7 +17,7 @@ debug = false
 panic = "abort"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 web-sys = { version = "0.3.70", features = [
@@ -44,6 +44,10 @@ serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["js"] }
 tokio = { version = "1", optional = true, features = ["sync"] }
 layer8-primitives = { git = "https://github.com/globe-and-citizen/layer8-primitives-rs.git", branch = "feat/getter-method-for-url" }
+wasm-bindgen-test = "0.3.50"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"
 
 [features]
 default = ["experimental"]

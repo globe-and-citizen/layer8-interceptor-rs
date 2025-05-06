@@ -47,9 +47,13 @@ impl From<reqwest::Response> for TransportError {
 }
 
 /// This function helps the user avoid the need of reloading their page in the case the tunnel has not been established.
-pub async fn health_check(provider_url: &str, proxy_url: &str) -> Result<(), JsError> {
+pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option<&str>) -> Result<(), JsError> {
     let mut proxy_url = Url::parse(proxy_url).map_err(|e| JsError::new(&format!("Failed to parse proxy URL: {}", e)))?;
-    proxy_url.set_path(format!("/health_check?backend_url={}", provider_url).as_str());
+    proxy_url.set_path("/health_check");
+    proxy_url.query_pairs_mut().clear().append_pair("backend_url", provider_url);
+    if let Some(client_id) = client_id {
+        proxy_url.query_pairs_mut().append_pair("client_id", client_id);
+    }
 
     let mut retries = 0;
     loop {
@@ -80,9 +84,9 @@ pub async fn health_check(provider_url: &str, proxy_url: &str) -> Result<(), JsE
                         sleep(retry_after as i32).await?;
                     }
                     None => {
-                        retries += 1;
+                        retries += 1; // 0
 
-                        // Each time we increase the exponential backoff by 2 seconds
+                        // Each time we calculate the exponential backoff by an exponent of {retry+1}
                         // e.g. 2, 4, 8
                         sleep((RETRY_OFFSET ^ retries) as i32).await?;
                     }
@@ -120,3 +124,6 @@ async fn sleep(delay_in_seconds: i32) -> Result<(), JsError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {}
