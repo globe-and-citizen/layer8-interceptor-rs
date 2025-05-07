@@ -76,6 +76,13 @@ jobs:
         run: cargo check --verbose --all-features
       - name: Run tests with features
         run: |
+          # If macOs install llvm with brew
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install llvm
+            export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+            export CC=/opt/homebrew/opt/llvm/bin/clang
+            export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
+          fi
           cargo install wasm-pack
           wasm-pack build --target bundler --all-features --release
           cargo test --verbose --all-features
