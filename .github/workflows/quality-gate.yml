@@ -25,7 +25,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86.0
+          toolchain: stable
       - uses: Swatinem/rust-cache@v1
       - name: Install Audit
         run: cargo install cargo-audit
@@ -41,12 +41,13 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86.0
+          toolchain: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v1
       - name: Test Format
-        run: cargo fmt -- --check
-      - run: cargo clippy --tests --all-features --all-targets -- -D clippy::all
+        run: |
+          cargo fmt -- --check
+          cargo clippy --tests --all-features --all-targets -- -D clippy::all
 
   cargo-doc:
     runs-on: ubuntu-latest
@@ -55,20 +56,11 @@ jobs:
       - name: run cargo doc
         run: RUSTDOCFLAGS="-D warnings" cargo doc
 
-  test-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Test build wasm for release
-        run: |
-          cargo install wasm-pack
-          wasm-pack build --target bundler --all-features --release
-          sudo apt-get install gawk -y
   test:
     strategy:
       matrix:
         platform: [macos-latest]
-        toolchain: [1.86.0]
+        toolchain: [stable]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
@@ -84,5 +76,7 @@ jobs:
         run: cargo check --verbose --all-features
       - name: Run tests with features
         run: |
+          cargo install wasm-pack
+          wasm-pack build --target bundler --all-features --release
           cargo test --verbose --all-features
           cd tests && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless)
