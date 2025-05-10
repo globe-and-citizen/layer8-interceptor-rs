@@ -597,11 +597,11 @@ async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
                 .ok_or(JsError::new(&format!("Client not found for provider: {}", provider_url)))
         })?;
 
-        &rebuild_url(&proxy.get_url().to_string())
+        &rebuild_url(proxy.get_url().as_ref())
     };
 
-    health_check(&provider_url, &proxy_url, None).await?;
-    init_tunnel(&provider_url, &proxy_url).await.map_err(|e| {
+    health_check(provider_url, proxy_url, None).await?;
+    init_tunnel(provider_url, proxy_url).await.map_err(|e| {
         console_error!(&format!(
             "Failed to establish encrypted tunnel with provider: {}. Error: {}",
             provider_url, e
