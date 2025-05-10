@@ -85,7 +85,7 @@ jobs:
             export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
             brew install --cask chromedriver
           else
-            apt-get install -y chromium-chromedriver
+            sudo apt-get install -y chromium-chromedriver
           fi
           cargo install wasm-pack
           wasm-pack build --target bundler --all-features --release
