@@ -1,3 +1,4 @@
+use reqwest::{StatusCode, header::HeaderValue};
 use serde::Deserialize;
 use url::Url;
 use wasm_bindgen::{JsError, UnwrapThrowExt};
@@ -37,15 +38,14 @@ pub enum TransportError {
 impl TransportError {
     // This is a loose-mapping of HTTP status codes to transport errors, we mostly care about fatal errors
     // and transient errors, so we ignore the rest.
-    fn new(resp: &reqwest::Response) -> Self {
-        match resp.status() {
+    fn new(status: &reqwest::StatusCode, headers: Option<&reqwest::header::HeaderMap<HeaderValue>>) -> Self {
+        match *status {
             reqwest::StatusCode::SERVICE_UNAVAILABLE => {
                 // 503 Service Unavailable sometimes provides a retry-After header, which indicates how long the client should wait before retrying.
-                let retry_after = resp
-                    .headers()
-                    .get("Retry-After")
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|h| h.parse::<u64>().ok());
+                let retry_after = match headers {
+                    Some(v) => v.get("Retry-After").and_then(|h| h.to_str().ok()).and_then(|h| h.parse::<u64>().ok()),
+                    None => None,
+                };
 
                 TransportError::Transient { retry_after }
             }
@@ -84,7 +84,35 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
             .await
             .map_err(|e| JsError::new(&format!("Failed to send request: {}", e)))?;
 
-        match TransportError::new(&resp) {
+        let process_request = |msg: &Message, proxy_dbg: &str| {
+            if msg.status != 200 {
+                let error = TransportError::new(
+                    &StatusCode::from_u16(msg.status).expect_throw("Expected the status code to be valid"),
+                    None,
+                );
+
+                match error {
+                    TransportError::Transient { .. } => {
+                        console_log!("The forward proxy is not healthy, but we can retry");
+                        return Ok(true);
+                    }
+                    TransportError::Fatal => {
+                        console_log!("The forward proxy is not healthy, and not retryable");
+                        return Err(JsError::new(&format!(
+                            "The {} proxy is not healthy, status code: {}, message: {:?}\n {:?}",
+                            proxy_dbg, msg.status, msg.message, msg.body_dump
+                        )));
+                    }
+                    _ => {
+                        unimplemented!("The health check response is not valid");
+                    }
+                }
+            }
+
+            Ok(false)
+        };
+
+        match TransportError::new(&resp.status(), Some(resp.headers())) {
             // The tunnel is not open, but we can retry after the specified time
             TransportError::Transient { retry_after } => {
                 match retry_after {
@@ -127,24 +155,61 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
                 match (health_check_response.forward_proxy, health_check_response.reverse_proxy) {
                     (Some(forward_proxy), Some(reverse_proxy)) => {
                         if forward_proxy.status != 200 && reverse_proxy.status != 200 {
-                            return Err(JsError::new(&format!(
-                                "Both the forward and reverse proxy are not healthy, status codes: {} {}; respectively",
-                                forward_proxy.status, reverse_proxy.status
-                            )));
+                            let forward_proxy_error = TransportError::new(
+                                &StatusCode::from_u16(forward_proxy.status).expect_throw("Expected the status code to be valid"),
+                                None,
+                            );
+
+                            let reverse_proxy_error = TransportError::new(
+                                &StatusCode::from_u16(reverse_proxy.status).expect_throw("Expected the status code to be valid"),
+                                None,
+                            );
+
+                            match (forward_proxy_error, reverse_proxy_error) {
+                                (TransportError::Transient { .. }, TransportError::Transient { .. }) => {
+                                    console_log!("Both the forward and reverse proxy are not healthy, but we can retry");
+                                    continue;
+                                }
+
+                                (TransportError::Fatal, TransportError::Fatal) => {
+                                    console_log!("The forward proxy is not healthy, but the reverse proxy is healthy");
+                                    return Err(JsError::new(&format!(
+                                        "Both the forward and reverse proxy are not healthy, status codes: {} {}; respectively",
+                                        forward_proxy.status, reverse_proxy.status
+                                    )));
+                                }
+
+                                (_, TransportError::Fatal) => {
+                                    console_log!("The reverse proxy is not healthy, and not retryable");
+                                    console_error!(&format!(
+                                        "The reverse proxy is not healthy, status code: {}, message: {:?}\n {:?}",
+                                        reverse_proxy.status, reverse_proxy.message, reverse_proxy.body_dump
+                                    ));
+
+                                    continue;
+                                }
+
+                                (TransportError::Fatal, _) => {
+                                    console_log!("The forward proxy is not healthy, and not retryable");
+                                    console_error!(&format!(
+                                        "The forward proxy is not healthy, status code: {}, message: {:?}\n {:?}",
+                                        forward_proxy.status, forward_proxy.message, forward_proxy.body_dump
+                                    ));
+                                    continue;
+                                }
+
+                                _ => {
+                                    unimplemented!("The health check response is not valid");
+                                }
+                            }
                         }
 
-                        if forward_proxy.status != 200 {
-                            return Err(JsError::new(&format!(
-                                "The forward proxy is not healthy, status code: {}, message: {:?}\n {:?}",
-                                forward_proxy.status, forward_proxy.message, forward_proxy.body_dump
-                            )));
+                        if process_request(&forward_proxy, "forward")? {
+                            continue;
                         }
 
-                        if reverse_proxy.status != 200 {
-                            return Err(JsError::new(&format!(
-                                "The reverse proxy is not healthy, status code: {}, message: {:?}\n {:?}",
-                                reverse_proxy.status, reverse_proxy.message, reverse_proxy.body_dump
-                            )));
+                        if process_request(&reverse_proxy, "reverse")? {
+                            continue;
                         }
 
                         console_log!(&format!(
@@ -152,21 +217,16 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
                             reverse_proxy.status, forward_proxy.status
                         ));
                     }
+
                     (Some(forward_proxy), None) => {
-                        if forward_proxy.status != 200 {
-                            return Err(JsError::new(&format!(
-                                "The forward proxy is not healthy, status code: {}, message: {:?}\n {:?}",
-                                forward_proxy.status, forward_proxy.message, forward_proxy.body_dump
-                            )));
+                        if process_request(&forward_proxy, "forward")? {
+                            continue;
                         }
                     }
 
                     (None, Some(reverse_proxy)) => {
-                        if reverse_proxy.status != 200 {
-                            return Err(JsError::new(&format!(
-                                "The reverse proxy is not healthy, status code: {}, message: {:?}\n {:?}",
-                                reverse_proxy.status, reverse_proxy.message, reverse_proxy.body_dump
-                            )));
+                        if process_request(&reverse_proxy, "reverse")? {
+                            continue;
                         }
                     }
 

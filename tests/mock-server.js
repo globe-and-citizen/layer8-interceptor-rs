@@ -35,12 +35,26 @@ app.get('/health_check', (req, res) => {
     switch (backend_url) {
         case "ok":
             console.log('Serving ok')
-            return res.status(200).send('ok')
+            return res.status(200).json({
+                forward_proxy: {
+                    status: 200,
+                },
+                reverse_proxy: {
+                    status: 200,
+                },
+            })
 
         case "service_unavailable":
             if (return_ok) {
                 console.log('Serving ok after serving service unavailable 2 times')
-                return res.status(200).send('ok')
+                return res.status(200).json({
+                    forward_proxy: {
+                        status: 200,
+                    },
+                    reverse_proxy: {
+                        status: 200,
+                    },
+                })
             }
 
             console.log('Serving service unavailable')
@@ -49,7 +63,14 @@ app.get('/health_check', (req, res) => {
         case "too_many_requests":
             if (return_ok) {
                 console.log('Serving ok after serving too many requests 2 times')
-                return res.status(200).send('ok')
+                return res.status(200).json({
+                    forward_proxy: {
+                        status: 200,
+                    },
+                    reverse_proxy: {
+                        status: 200,
+                    },
+                })
             }
 
             console.log('Serving too many requests')
@@ -58,7 +79,14 @@ app.get('/health_check', (req, res) => {
         case "internal_server_error":
             if (return_ok) {
                 console.log('Serving ok after serving internal server error 2 times')
-                return res.status(200).send('ok')
+                return res.status(200).json({
+                    forward_proxy: {
+                        status: 200,
+                    },
+                    reverse_proxy: {
+                        status: 200,
+                    },
+                })
             }
 
             console.log('Serving internal server error')
@@ -66,7 +94,14 @@ app.get('/health_check', (req, res) => {
 
         default:
             console.log('Serving default ok')
-            return res.status(200).send('ok')
+            return res.status(200).json({
+                forward_proxy: {
+                    status: 200,
+                },
+                reverse_proxy: {
+                    status: 200,
+                },
+            })
     }
 })
 
