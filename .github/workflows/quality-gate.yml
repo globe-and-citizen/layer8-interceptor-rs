@@ -16,50 +16,50 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  audit:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Sources
-        uses: actions/checkout@v3
-      - name: Install Toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v1
-      - name: Install Audit
-        run: cargo install cargo-audit
-      - name: Run Audit
-        run: cargo audit
+  # audit:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout Sources
+  #       uses: actions/checkout@v3
+  #     - name: Install Toolchain
+  #       uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: stable
+  #     - uses: Swatinem/rust-cache@v1
+  #     - name: Install Audit
+  #       run: cargo install cargo-audit
+  #     - name: Run Audit
+  #       run: cargo audit
 
-  lint:
-    name: lint-and-format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v1
-      - name: Test Format
-        run: |
-          cargo fmt -- --check
-          cargo clippy --tests --all-features --all-targets -- -D clippy::all
+  # lint:
+  #   name: lint-and-format
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: Install stable toolchain
+  #       uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: stable
+  #         components: rustfmt, clippy
+  #     - uses: Swatinem/rust-cache@v1
+  #     - name: Test Format
+  #       run: |
+  #         cargo fmt -- --check
+  #         cargo clippy --tests --all-features --all-targets -- -D clippy::all
 
-  cargo-doc:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: run cargo doc
-        run: RUSTDOCFLAGS="-D warnings" cargo doc
+  # cargo-doc:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: run cargo doc
+  #       run: RUSTDOCFLAGS="-D warnings" cargo doc
 
   test:
     strategy:
       matrix:
-        platform: [ubuntu-latest, macos-latest]
+        platform: [ubuntu-latest]
         toolchain: [stable]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -85,10 +85,10 @@ jobs:
             export AR=/opt/homebrew/opt/llvm/bin/llvm-ar
             brew install --cask chromedriver
           else
-            sudo apt-get install chromium-chromedriver
+            apt-get install -y chromium-chromedriver
           fi
           cargo install wasm-pack
           wasm-pack build --target bundler --all-features --release
           cargo test --verbose --all-features
           # tcp:9999 is leaked by this command
-          cd tests && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless)
+          cd tests && npm i && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless)

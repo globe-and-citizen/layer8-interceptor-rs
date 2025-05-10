@@ -199,6 +199,3 @@ async fn sleep(delay_in_seconds: i32) -> Result<(), JsError> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {}
