@@ -51,6 +51,10 @@ wasm-bindgen-test = "0.3.50"
 
 [features]
 default = ["experimental"]
+
+# `wasm-pack test --chrome --headless` will not work with formadata_polyfill.ts and using formdata_polyfill.js will not work on build
+formdata_polyfill_js_test = []
+
 # ⚠️ Unstable; work on the feature is highly experimental and no guarantees are given
 experimental = ["websocket", "dep:tokio"]
 websocket = [

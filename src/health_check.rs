@@ -18,7 +18,7 @@ struct HealthCheckResponse {
 struct Message {
     status: u16,
     message: Option<String>,
-    body_dump: Option<Vec<u8>>,
+    body_dump: Option<String>,
 }
 
 pub enum TransportError {
@@ -71,6 +71,37 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
         proxy_url.query_pairs_mut().append_pair("client_id", client_id);
     }
 
+    let process_request = |msg: &Message, proxy_dbg: &str| {
+        if msg.status != 200 {
+            let error = TransportError::new(
+                &StatusCode::from_u16(msg.status).expect_throw("Expected the status code to be valid"),
+                None,
+            );
+
+            match error {
+                TransportError::Transient { .. } => {
+                    console_log!(&format!("The {} proxy is not healthy, but we can retry", proxy_dbg));
+                    return Ok(true);
+                }
+                TransportError::Fatal => {
+                    console_log!(&format!("The {} proxy is not healthy, and not retryable...", proxy_dbg));
+                    return Err(JsError::new(&format!(
+                        "The {} proxy is not healthy, status code: {}, message: {:?}\n {:?}",
+                        proxy_dbg, msg.status, msg.message, msg.body_dump
+                    )));
+                }
+                _ => {
+                    return Err(JsError::new(&format!(
+                        "The health check response from the {} proxy is not valid, expected a transient or fatal error",
+                        proxy_dbg
+                    )));
+                }
+            }
+        }
+
+        Ok(false)
+    };
+
     let mut retries = 0;
     loop {
         if retries == 3 {
@@ -83,34 +114,6 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
             .send()
             .await
             .map_err(|e| JsError::new(&format!("Failed to send request: {}", e)))?;
-
-        let process_request = |msg: &Message, proxy_dbg: &str| {
-            if msg.status != 200 {
-                let error = TransportError::new(
-                    &StatusCode::from_u16(msg.status).expect_throw("Expected the status code to be valid"),
-                    None,
-                );
-
-                match error {
-                    TransportError::Transient { .. } => {
-                        console_log!("The forward proxy is not healthy, but we can retry");
-                        return Ok(true);
-                    }
-                    TransportError::Fatal => {
-                        console_log!("The forward proxy is not healthy, and not retryable");
-                        return Err(JsError::new(&format!(
-                            "The {} proxy is not healthy, status code: {}, message: {:?}\n {:?}",
-                            proxy_dbg, msg.status, msg.message, msg.body_dump
-                        )));
-                    }
-                    _ => {
-                        unimplemented!("The health check response is not valid");
-                    }
-                }
-            }
-
-            Ok(false)
-        };
 
         match TransportError::new(&resp.status(), Some(resp.headers())) {
             // The tunnel is not open, but we can retry after the specified time
@@ -149,8 +152,10 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
                     .await
                     .map_err(|e| JsError::new(&format!("Failed to read response body: {}", e)))?;
 
-                let health_check_response: HealthCheckResponse =
-                    serde_json::from_slice(&body).map_err(|e| JsError::new(&format!("Failed to parse response body: {}", e)))?;
+                let health_check_response: HealthCheckResponse = serde_json::from_slice(&body).map_err(|e| {
+                    console_log!(&format!("Failed to parse response body: {}", String::from_utf8_lossy(&body)));
+                    JsError::new(&format!("Failed to parse response body: {}", e))
+                })?;
 
                 match (health_check_response.forward_proxy, health_check_response.reverse_proxy) {
                     (Some(forward_proxy), Some(reverse_proxy)) => {
@@ -168,11 +173,17 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
                             match (forward_proxy_error, reverse_proxy_error) {
                                 (TransportError::Transient { .. }, TransportError::Transient { .. }) => {
                                     console_log!("Both the forward and reverse proxy are not healthy, but we can retry");
+
+                                    retries += 1; // 0
+
+                                    // Each time we calculate the exponential backoff by an exponent of {retry+1}
+                                    // e.g. 2, 4, 8
+                                    sleep((RETRY_OFFSET ^ retries) as i32).await?;
                                     continue;
                                 }
 
                                 (TransportError::Fatal, TransportError::Fatal) => {
-                                    console_log!("The forward proxy is not healthy, but the reverse proxy is healthy");
+                                    console_log!("The forward proxy and reverse proxy is healthy, and not retryable");
                                     return Err(JsError::new(&format!(
                                         "Both the forward and reverse proxy are not healthy, status codes: {} {}; respectively",
                                         forward_proxy.status, reverse_proxy.status
@@ -181,34 +192,34 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
 
                                 (_, TransportError::Fatal) => {
                                     console_log!("The reverse proxy is not healthy, and not retryable");
-                                    console_error!(&format!(
+                                    return Err(JsError::new(&format!(
                                         "The reverse proxy is not healthy, status code: {}, message: {:?}\n {:?}",
                                         reverse_proxy.status, reverse_proxy.message, reverse_proxy.body_dump
-                                    ));
-
-                                    continue;
+                                    )));
                                 }
 
                                 (TransportError::Fatal, _) => {
                                     console_log!("The forward proxy is not healthy, and not retryable");
-                                    console_error!(&format!(
+                                    return Err(JsError::new(&format!(
                                         "The forward proxy is not healthy, status code: {}, message: {:?}\n {:?}",
                                         forward_proxy.status, forward_proxy.message, forward_proxy.body_dump
-                                    ));
-                                    continue;
+                                    )));
                                 }
 
                                 _ => {
-                                    unimplemented!("The health check response is not valid");
+                                    return Err(JsError::new(
+                                        "The health check response from the forward proxy is not valid, expected a transient or fatal error",
+                                    ));
                                 }
                             }
                         }
 
-                        if process_request(&forward_proxy, "forward")? {
-                            continue;
-                        }
+                        if process_request(&forward_proxy, "forward")? || process_request(&reverse_proxy, "reverse")? {
+                            retries += 1; // 0
 
-                        if process_request(&reverse_proxy, "reverse")? {
+                            // Each time we calculate the exponential backoff by an exponent of {retry+1}
+                            // e.g. 2, 4, 8
+                            sleep((RETRY_OFFSET ^ retries) as i32).await?;
                             continue;
                         }
 
@@ -220,12 +231,22 @@ pub async fn health_check(provider_url: &str, proxy_url: &str, client_id: Option
 
                     (Some(forward_proxy), None) => {
                         if process_request(&forward_proxy, "forward")? {
+                            retries += 1; // 0
+
+                            // Each time we calculate the exponential backoff by an exponent of {retry+1}
+                            // e.g. 2, 4, 8
+                            sleep((RETRY_OFFSET ^ retries) as i32).await?;
                             continue;
                         }
                     }
 
                     (None, Some(reverse_proxy)) => {
                         if process_request(&reverse_proxy, "reverse")? {
+                            retries += 1; // 0
+
+                            // Each time we calculate the exponential backoff by an exponent of {retry+1}
+                            // e.g. 2, 4, 8
+                            sleep((RETRY_OFFSET ^ retries) as i32).await?;
                             continue;
                         }
                     }
@@ -246,7 +267,7 @@ async fn sleep(delay_in_seconds: i32) -> Result<(), JsError> {
 
     let mut cb = |resolve: js_sys::Function, _: js_sys::Function| {
         web_sys::window()
-            .unwrap()
+            .expect_throw("Failed to get window object, this should be infallible")
             .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, delay_in_millis)
             .expect_throw("Failed to set timeout");
     };

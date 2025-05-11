@@ -77,7 +77,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
             console_log!(&format!("error is {:?}", e));
             return Err(JsError::new(&format!(
                 "Error occurred interacting with IndexDB: {}",
-                e.as_string().unwrap_or("error unwrappable".to_string())
+                e.as_string().unwrap_or(format!("error unwrappable: {:?}", e))
             )));
         }
     };
@@ -152,8 +152,11 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
                 val
             }
             Err(e) => {
-                console_log!(&format!("Failed to fetch: {}\nWith request metadata {:?}", e, req_metadata));
-                return Err(JsError::new(&e));
+                // let's try a hard reinitialization of the tunnel
+                HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
+                console_log!("Checking health of the provider and reinitializing the tunnel");
+                assert_tunnel_is_open(&rebuild_url(&url)).await?;
+                return Err(JsError::new(&format!("Failed to fetch: {}\nWith request metadata {:?}", e, req_metadata)));
             }
         }
     };
@@ -198,7 +201,7 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         Err(e) => {
             return Err(JsError::new(&format!(
                 "Error occurred interacting with IndexDB: {}",
-                e.as_string().unwrap_or("error unwrappable".to_string())
+                e.as_string().expect_throw("error unwrappable")
             )));
         }
     };
@@ -338,6 +341,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
             x if x.is_instance_of::<Uint8Array>() => req.body = x.dyn_into::<Uint8Array>().unwrap_throw().to_vec(),
 
             x if x.is_instance_of::<FormData>() => {
+                console_log!("FormData detected");
                 let boundary = format!("---------------------------{}", Uuid::new_v4());
 
                 // we expect it to be Uint8Array
@@ -347,6 +351,7 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
                     .dyn_into::<Uint8Array>()
                     .map_err(|e| JsError::new(&format!("Failed to convert FormData to Uint8Array: {:?}", e)))?;
 
+                console_log!(&format!("Form body length: {}", val.length()));
                 req.body = val.to_vec();
                 req_metadata
                     .headers
@@ -372,14 +377,19 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
     {
         Ok(res) => res,
         Err(e) => {
-            console_log!(&format!("Failed to fetch: {}\nWith request {:?}", e, req));
+            // let's try a hard reinitialization of the tunnel
+            if !L8_CLIENTS.with_borrow(|v| v.is_empty()) {
+                HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
+                console_log!("Checking health of the provider and reinitializing the tunnel");
+                assert_tunnel_is_open(&rebuild_url(&url)).await?;
+            }
 
-            return Err(JsError::new(&e));
+            return Err(JsError::new(&format!("Failed to fetch: {}. With request_metadata {:?}", e, req_metadata)));
         }
     };
 
     let response_init = ResponseInit::new();
-    let headers = web_sys::Headers::new().unwrap();
+    let headers = web_sys::Headers::new().expect_throw("expected headers to be created; qed");
     for (key, value) in res.headers.iter() {
         headers
             .append(key, value)
@@ -490,6 +500,26 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
 }
 
 async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
+    // Add the provider and proxy to the L8_CLIENTS map, useful when doing health checks and trying to reinitialize the tunnel
+    // if the tunnel initialization fails on first try.
+    {
+        let proxy_url = Url::parse(proxy).map_err(|e| e.to_string())?;
+
+        let url_proxy_ = &format!(
+            "{}://{}:{}",
+            proxy_url.scheme(),
+            proxy_url.host().expect_throw("expected host to be present; qed"),
+            proxy_url.port().unwrap_or(443)
+        );
+
+        let provider_client = new_client(url_proxy_).map_err(|e| {
+            HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
+            e.to_string()
+        })?;
+
+        L8_CLIENTS.with_borrow_mut(|val| val.insert(provider.to_string(), provider_client));
+    }
+
     let _provider_url = rebuild_url(provider);
     let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
 
@@ -511,8 +541,14 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
                 val.insert(_provider_url, uuid.clone());
             });
 
-            headers.insert("x-ecdh-init", HeaderValue::from_str(&b64_pub_jwk).unwrap());
-            headers.insert("x-client-uuid", HeaderValue::from_str(&uuid).unwrap());
+            headers.insert(
+                "x-ecdh-init",
+                HeaderValue::from_str(&b64_pub_jwk).expect_throw("expected b64_pub_jwk to be a valid header value; qed"),
+            );
+            headers.insert(
+                "x-client-uuid",
+                HeaderValue::from_str(&uuid).expect_throw("expected uuid to be a valid header value; qed"),
+            );
             headers
         })
         .send()
@@ -552,22 +588,6 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
     HTTP_USER_SYMMETRIC_KEY.set(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
     HTTP_ENCRYPTED_TUNNEL_FLAG.set(true);
 
-    let proxy_url = Url::parse(&proxy).map_err(|e| e.to_string())?;
-
-    let url_proxy_ = &format!(
-        "{}://{}:{}",
-        proxy_url.scheme(),
-        proxy_url.host().expect_throw("expected host to be present; qed"),
-        proxy_url.port().unwrap_or(443)
-    );
-
-    let provider_client = new_client(url_proxy_).map_err(|e| {
-        HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
-        e.to_string()
-    })?;
-
-    L8_CLIENTS.with_borrow_mut(|val| val.insert(provider.to_string(), provider_client));
-
     console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
     Ok(())
 }
@@ -584,12 +604,11 @@ pub(crate) fn rebuild_url(url: &str) -> String {
 }
 
 async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
-    let tunnel_flag = HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v);
-    if tunnel_flag {
+    if HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v) {
         return Ok(());
     }
 
-    console_log!(&format!("Doing health check calls for provider: {}", provider_url));
+    console_log!(&format!("Doing health check call for provider: {}", provider_url));
     let proxy_url = {
         let proxy = L8_CLIENTS.with_borrow(|v| {
             v.get(provider_url)
@@ -608,10 +627,6 @@ async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
         ));
         JsError::new(&e)
     })?;
-
-    HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow_mut(|v| {
-        *v = true;
-    });
 
     Ok(())
 }
