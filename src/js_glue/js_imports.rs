@@ -56,10 +56,8 @@ extern "C" {
 }
 
 #[cfg(feature = "formdata_polyfill_js_test")]
-#[wasm_bindgen(module = "/src/js_glue/formdata_polyfill.js")]
-extern "C" {
-    #[wasm_bindgen(catch, js_name = parseFormDataToArray)]
-    pub async fn parse_form_data_to_array(form_data: web_sys::FormData, boundary: String) -> Result<JsValue, JsValue>;
+pub async fn parse_form_data_to_array(_: web_sys::FormData, _: String) -> Result<JsValue, JsValue> {
+    unimplemented!("FormData polyfill is not available in this build. Please disable the feature flag 'formdata_polyfill_js_test' to use it.");
 }
 
 #[macro_export]
