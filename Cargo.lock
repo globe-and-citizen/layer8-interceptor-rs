@@ -725,8 +725,9 @@ dependencies = [
 
 [[package]]
 name = "layer8-primitives"
-version = "0.2.0"
-source = "git+https://github.com/globe-and-citizen/layer8-primitives-rs.git?branch=feat%2Fgetter-method-for-url#fdf176deb60dc2b80138e330204b5c444231c3fd"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f349194438920a0cde9d48e6d44c155654239f5a2f61526ca99780ff2217113f"
 dependencies = [
  "aes-gcm",
  "base64",
