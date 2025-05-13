@@ -16,45 +16,45 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  # audit:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout Sources
-  #       uses: actions/checkout@v3
-  #     - name: Install Toolchain
-  #       uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: stable
-  #     - uses: Swatinem/rust-cache@v1
-  #     - name: Install Audit
-  #       run: cargo install cargo-audit
-  #     - name: Run Audit
-  #       run: cargo audit
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Sources
+        uses: actions/checkout@v3
+      - name: Install Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
+      - name: Install Audit
+        run: cargo install cargo-audit
+      - name: Run Audit
+        run: cargo audit
 
-  # lint:
-  #   name: lint-and-format
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #     - name: Install stable toolchain
-  #       uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: stable
-  #         components: rustfmt, clippy
-  #     - uses: Swatinem/rust-cache@v1
-  #     - name: Test Format
-  #       run: |
-  #         cargo fmt -- --check
-  #         cargo clippy --tests --all-features --all-targets -- -D clippy::all
+  lint:
+    name: lint-and-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v1
+      - name: Test Format
+        run: |
+          cargo fmt -- --check
+          cargo clippy --tests --all-features --all-targets -- -D clippy::all
 
-  # cargo-doc:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: run cargo doc
-  #       run: RUSTDOCFLAGS="-D warnings" cargo doc
+  cargo-doc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: run cargo doc
+        run: RUSTDOCFLAGS="-D warnings" cargo doc
 
   test:
     strategy:
