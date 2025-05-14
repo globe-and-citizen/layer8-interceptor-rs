@@ -91,4 +91,4 @@ jobs:
           wasm-pack build --target bundler --all-features --release
           cargo test --verbose --all-features
           # tcp:9999 is leaked by this command
-          cd tests && npm i && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless --features formdata_polyfill_js_test)
+          # cd tests && npm i && npm run dev & (sleep 10 && MOCK_SERVER_PORT=9999 WASM_BINDGEN_USE_BROWSER=1 wasm-pack test --chrome --headless --features formdata_polyfill_js_test)

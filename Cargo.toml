@@ -43,7 +43,6 @@ js-sys = "0.3"
 serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["js"] }
 tokio = { version = "1", optional = true, features = ["sync"] }
-wasm-bindgen-test = "0.3.50"
 layer8-primitives = "0.2"
 
 [dev-dependencies]

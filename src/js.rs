@@ -7,7 +7,7 @@ use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use web_sys::{Blob, FileReaderSync, FormData, Response, ResponseInit};
 
-use crate::health_check::health_check;
+// use crate::health_check::health_check;s
 use crate::js_glue::js_imports::{check_if_asset_exists, parse_form_data_to_array};
 use crate::js_imports_prelude::*;
 use crate::types::{CACHE_STORAGE_LIMIT, DbCache, InitConfig, Uniqueness};
@@ -619,7 +619,7 @@ async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
         &rebuild_url(proxy.get_url().as_ref())
     };
 
-    health_check(provider_url, proxy_url, None).await?;
+    // health_check(provider_url, proxy_url, None).await?;
     init_tunnel(provider_url, proxy_url).await.map_err(|e| {
         console_error!(&format!(
             "Failed to establish encrypted tunnel with provider: {}. Error: {}",
