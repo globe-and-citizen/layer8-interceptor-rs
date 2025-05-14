@@ -152,10 +152,6 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
                 val
             }
             Err(e) => {
-                // let's try a hard reinitialization of the tunnel
-                HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
-                console_log!("Checking health of the provider and reinitializing the tunnel");
-                assert_tunnel_is_open(&rebuild_url(&url)).await?;
                 return Err(JsError::new(&format!("Failed to fetch: {}\nWith request metadata {:?}", e, req_metadata)));
             }
         }
@@ -377,13 +373,6 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
     {
         Ok(res) => res,
         Err(e) => {
-            // let's try a hard reinitialization of the tunnel
-            if !L8_CLIENTS.with_borrow(|v| v.is_empty()) {
-                HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
-                console_log!("Checking health of the provider and reinitializing the tunnel");
-                assert_tunnel_is_open(&rebuild_url(&url)).await?;
-            }
-
             return Err(JsError::new(&format!("Failed to fetch: {}. With request_metadata {:?}", e, req_metadata)));
         }
     };
