@@ -23,7 +23,7 @@ jobs:
       - name: Build
         run: |
           cargo install wasm-pack
-          wasm-pack build --target bundler --all-features --release
+          wasm-pack build --target bundler --release # we only care about the default-features
           sudo apt-get install gawk -y
           gawk -f post_build.gawk ./pkg/package.json > ./pkg/package.json.tmp && mv ./pkg/package.json.tmp ./pkg/package.json
           gawk -f post_build.gawk ./pkg/layer8_interceptor_rs.js > ./pkg/layer8_interceptor_rs.js.tmp && mv ./pkg/layer8_interceptor_rs.js.tmp ./pkg/layer8_interceptor_rs.js
