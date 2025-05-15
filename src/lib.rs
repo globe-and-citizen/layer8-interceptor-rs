@@ -1,3 +1,4 @@
+pub mod health_check;
 pub mod js;
 #[cfg(feature = "websocket")]
 pub mod websocket;

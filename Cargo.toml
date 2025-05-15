@@ -1,7 +1,7 @@
 [package]
 name = "layer8-interceptor-rs"
 version = "0.1.2"
-edition = "2021"
+edition = "2024"
 authors = ["Osoro Bironga <fanosoro@gmail.com>"]
 description = "This repository contains a Rust implementation of the Layer8 Interceptor. Analogous to <https://github.com/globe-and-citizen/layer8-interceptor>"
 repository = "github.com/muse254/layer8-interceptor-rs"
@@ -17,7 +17,7 @@ debug = false
 panic = "abort"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 web-sys = { version = "0.3.70", features = [
@@ -30,6 +30,7 @@ web-sys = { version = "0.3.70", features = [
     'ReadableStreamDefaultReader',
     'Blob',
     'FileReaderSync',
+    'Window',
 ] }
 wasm-bindgen = "0.2"
 base64 = { version = "0.22" }
@@ -44,8 +45,12 @@ uuid = { version = "1", features = ["js"] }
 tokio = { version = "1", optional = true, features = ["sync"] }
 layer8-primitives = "0.2"
 
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+
 [features]
 default = ["experimental"]
+
 # ⚠️ Unstable; work on the feature is highly experimental and no guarantees are given
 experimental = ["websocket", "dep:tokio"]
 websocket = [
@@ -55,3 +60,6 @@ websocket = [
     "web-sys/WebSocket",
     "web-sys/Window",
 ]
+
+# 🧪 Activate for Tests; `wasm-pack test --chrome --headless` will not work with formadata_polyfill.ts and using formdata_polyfill.js will not work on build
+formdata_polyfill_js_test = []
