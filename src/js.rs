@@ -545,6 +545,11 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
             JsError::new(&e)
         })?;
 
+        init_tunnel(&provider, &init_config.proxy).await.map_err(|e| {
+            console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+            JsError::new(&e)
+        })?;
+
         GLOBAL_STATE.with_borrow_mut(|v| {
             let instances = v
                 .get_mut(&provider)
