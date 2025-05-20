@@ -1,4 +1,4 @@
-use std::{cell::Cell, cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap};
 
 use js_sys::{ArrayBuffer, Object, Uint8Array};
 use reqwest::header::HeaderValue;
@@ -22,15 +22,31 @@ const INDEXED_DB_CACHE: &str = "_layer8cache";
 /// The cache time-to-live for the IndexedDB cache is 2 days.
 const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in milliseconds
 
+// This memory does not grow to be too large since a page reload will wipe the memory
+#[derive(Clone)]
+struct ClientInstance {
+    client_uuid: String,
+    static_paths: Vec<String>,
+    #[allow(dead_code)]
+    pub_priv_ecdh: (crypto::Jwk, crypto::Jwk),
+    symmetric_key: crypto::Jwk,
+    up_jwt: String,
+}
+
 thread_local! {
-    static HTTP_PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static HTTP_PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
-    static HTTP_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
-    static HTTP_UP_JWT: RefCell<String> = RefCell::new("".to_string());
-    static HTTP_ENCRYPTED_TUNNEL_FLAG: RefCell<bool> = const { RefCell::new(false) };
-    static HTTP_UUID: RefCell<HashMap<String,String>> = RefCell::new(HashMap::new());
+    // maps the [provider] --> list of clientInstances with their own states
+    // if an operation is not opinionated by what clientInstance they want we get the first one that has tunnel established
+    static GLOBAL_STATE: RefCell<HashMap<String, Vec<ClientInstance>>> = RefCell::new(HashMap::new());
+
+
+    // static HTTP_PUB_JWK_ECDH:  Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    // static HTTP_PRIVATE_JWK_ECDH: Cell<Option<crypto::Jwk>> = const { Cell::new(None) };
+    // static HTTP_USER_SYMMETRIC_KEY: RefCell<Option<crypto::Jwk> >= const { RefCell::new(None) };
+    // static HTTP_UP_JWT: RefCell<String> = RefCell::new("".to_string());
+    // static HTTP_ENCRYPTED_TUNNEL_FLAG: RefCell<bool> = const { RefCell::new(false) };
+    // static HTTP_UUID: RefCell<HashMap<String,String>> = RefCell::new(HashMap::new());
     static COUNTER: RefCell<i32> = const { RefCell::new(0) };
-    static STATIC_PATHS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    // static STATIC_PATHS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
     // We are using a map though we expect the user to use only a single provider, work on extending this to multiple
     // providers is sometime in the future.
@@ -84,18 +100,32 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 
     assert_tunnel_is_open(&rebuild_url(&url)).await?;
 
-    let static_paths = STATIC_PATHS.with(|v| {
-        let val = v.take();
-        v.replace(val.clone());
-        val
-    });
+    // get the first instance
+    let instance = GLOBAL_STATE.with_borrow(|v| match v.get(&rebuild_url(&url)) {
+        Some(val) => {
+            if val.is_empty() {
+                return Err(JsError::new("tunnel initialization is malformed"));
+            }
+
+            Ok(val[0].clone())
+        }
+        None => return Err(JsError::new("tunnel initialization is malformed")),
+    })?;
+
+    // let instance =
+
+    // let static_paths = STATIC_PATHS.with(|v| {
+    //     let val = v.take();
+    //     v.replace(val.clone());
+    //     val
+    // });
 
     let req_url = rebuild_url(&url);
 
     let client = L8_CLIENTS.with_borrow(|v| v.get(&req_url).cloned());
 
     let mut assets_glob_url = req_url.clone();
-    for static_path in static_paths.iter() {
+    for static_path in instance.static_paths.iter() {
         if url.contains(static_path) {
             assets_glob_url.push_str(static_path);
             break;
@@ -113,36 +143,43 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
         url_path: Some(url.clone()),
     };
 
-    let symmetric_key = {
-        let symmetric_key = HTTP_USER_SYMMETRIC_KEY.with(|v| {
-            let val = v.take();
-            v.replace(val.clone());
-            val
-        });
+    // let symmetric_key = {
+    //     let symmetric_key = HTTP_USER_SYMMETRIC_KEY.with(|v| {
+    //         let val = v.take();
+    //         v.replace(val.clone());
+    //         val
+    //     });
 
-        match symmetric_key {
-            Some(key) => key,
-            None => {
-                return Err(JsError::new("symmetric key not found."));
-            }
-        }
-    };
+    //     match symmetric_key {
+    //         Some(key) => key,
+    //         None => {
+    //             return Err(JsError::new("symmetric key not found."));
+    //         }
+    //     }
+    // };
 
     let res = {
-        let up_jwt = HTTP_UP_JWT.with(|v| {
-            let val = v.take();
-            v.replace(val.clone());
-            val
-        });
+        // let up_jwt = HTTP_UP_JWT.with(|v| {
+        //     let val = v.take();
+        //     v.replace(val.clone());
+        //     val
+        // });
 
-        let provider = rebuild_url(url.as_str());
-        let uuid = HTTP_UUID
-            .with_borrow(|v| v.get(&provider).cloned())
-            .ok_or_else(|| JsError::new(&format!("UUID not found for resource provider, {}.", provider)))?;
+        // let provider = rebuild_url(url.as_str());
+        // let uuid = HTTP_UUID
+        //     .with_borrow(|v| v.get(&provider).cloned())
+        //     .ok_or_else(|| JsError::new(&format!("UUID not found for resource provider, {}.", provider)))?;
 
         let res = client
             .expect_throw("client could not be found. This is likely due to the encrypted tunnel not being established correctly.")
-            .r#do((&Request::default(), &req_metadata), &symmetric_key, &req_url, true, &up_jwt, &uuid)
+            .r#do(
+                (&Request::default(), &req_metadata),
+                &instance.symmetric_key,
+                &req_url,
+                true,
+                &instance.up_jwt,
+                &instance.client_uuid,
+            )
             .await;
 
         match res {
@@ -210,8 +247,15 @@ pub async fn get_static(url: String) -> Result<String, JsError> {
 /// Returning a boolean value.
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = checkEncryptedTunnel)]
-pub async fn check_encrypted_tunnel() -> bool {
-    HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v)
+pub async fn check_encrypted_tunnel(provider: Option<String>) -> bool {
+    if provider.is_none() {
+        return false;
+    }
+
+    GLOBAL_STATE.with_borrow(|v| match v.get(&provider.unwrap()) {
+        Some(val) => !val.is_empty(),
+        None => false,
+    })
 }
 
 /// This function is an override of the fetch function. It's arguments are a URL and an options object.
@@ -287,30 +331,42 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
         }
     };
 
-    let symmetric_key = {
-        let val = HTTP_USER_SYMMETRIC_KEY.with(|v| {
-            let val = v.take();
-            v.replace(val.clone());
-            val
-        });
-
-        match val {
-            Some(key) => key,
-            None => {
-                return Err(JsError::new("symmetric key not found."));
+    // get the first instance
+    let instance = GLOBAL_STATE.with_borrow(|v| match v.get(&backend_url) {
+        Some(val) => {
+            if val.is_empty() {
+                return Err(JsError::new("tunnel initialization is malformed"));
             }
+
+            Ok(val[0].clone())
         }
-    };
+        None => return Err(JsError::new("tunnel initialization is malformed")),
+    })?;
 
-    let up_jwt = HTTP_UP_JWT.with(|v| {
-        let val = v.take();
-        v.replace(val.clone());
-        val
-    });
+    // let symmetric_key = {
+    //     let val = HTTP_USER_SYMMETRIC_KEY.with(|v| {
+    //         let val = v.take();
+    //         v.replace(val.clone());
+    //         val
+    //     });
 
-    let uuid = HTTP_UUID
-        .with_borrow(|v| v.get(&backend_url).cloned())
-        .ok_or_else(|| JsError::new(&format!("UUID not found for resource provider, {}.", backend_url)))?;
+    //     match val {
+    //         Some(key) => key,
+    //         None => {
+    //             return Err(JsError::new("symmetric key not found."));
+    //         }
+    //     }
+    // };
+
+    // let up_jwt = HTTP_UP_JWT.with(|v| {
+    //     let val = v.take();
+    //     v.replace(val.clone());
+    //     val
+    // });
+
+    // let uuid = HTTP_UUID
+    //     .with_borrow(|v| v.get(&backend_url).cloned())
+    //     .ok_or_else(|| JsError::new(&format!("UUID not found for resource provider, {}.", backend_url)))?;
 
     // we don't care about the content-type; as long as the data is encrypted and custom protocols like websockets
     // and other upgrades are handled by separate extensions logic; see [`websocket::WasmWebSocket`]
@@ -368,7 +424,14 @@ pub async fn fetch(url: String, options: JsValue) -> Result<Response, JsError> {
 
     req_metadata.url_path = Some(url.clone());
     let res = match client
-        .r#do((&req, &req_metadata), &symmetric_key, &backend_url, true, &up_jwt, &uuid)
+        .r#do(
+            (&req, &req_metadata),
+            &instance.symmetric_key,
+            &backend_url,
+            true,
+            &instance.up_jwt,
+            &instance.client_uuid,
+        )
         .await
     {
         Ok(res) => res,
@@ -453,10 +516,10 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
     let init_config = InitConfig::new(init_config).await?;
 
     // populating the staticPaths static
-    STATIC_PATHS.with(|v| {
-        console_log!(&format!("Static paths: {:?}", init_config.static_paths));
-        v.replace(init_config.static_paths.clone());
-    });
+    // STATIC_PATHS.with(|v| {
+    //     console_log!(&format!("Static paths: {:?}", init_config.static_paths));
+    //     v.replace(init_config.static_paths.clone());
+    // });
 
     let cache = INDEXED_DBS.with(|v| {
         let val = v.get(INDEXED_DB_CACHE).expect_throw("expected indexed db to be present; qed");
@@ -467,20 +530,31 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
 
     let mut providers = Vec::new();
     for provider in init_config.providers.iter() {
+        let provider = rebuild_url(provider);
+
         console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
 
         // before we initialize creation of a client check if one is already linked with the provider
-        if L8_CLIENTS.with_borrow(|v| v.get(provider).is_some()) {
+        if L8_CLIENTS.with_borrow(|v| v.get(&provider).is_some()) {
             console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
             continue;
         }
 
-        init_tunnel(provider, &init_config.proxy).await.map_err(|e| {
+        init_tunnel(&provider, &init_config.proxy).await.map_err(|e| {
             console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
             JsError::new(&e)
         })?;
 
-        providers.push(provider);
+        GLOBAL_STATE.with_borrow_mut(|v| {
+            let instances = v
+                .get_mut(&provider)
+                .expect_throw("we expect a value here since tunnel init was successful");
+            for i in instances {
+                i.static_paths = init_config.static_paths.clone();
+            }
+        });
+
+        providers.push(provider.clone());
         console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
     }
 
@@ -502,34 +576,28 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         );
 
         let provider_client = new_client(url_proxy_).map_err(|e| {
-            HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
+            GLOBAL_STATE.with_borrow_mut(|v| v.remove(provider));
             e.to_string()
         })?;
 
         L8_CLIENTS.with_borrow_mut(|val| val.insert(provider.to_string(), provider_client));
     }
 
-    let _provider_url = rebuild_url(provider);
     let (private_jwk_ecdh, pub_jwk_ecdh) = generate_key_pair(crypto::KeyUse::Ecdh)?;
 
-    HTTP_PRIVATE_JWK_ECDH.with(|v| {
-        v.set(Some(private_jwk_ecdh.clone()));
-    });
+    // HTTP_PRIVATE_JWK_ECDH.with(|v| {
+    //     v.set(Some(private_jwk_ecdh.clone()));
+    // });
 
     let b64_pub_jwk = pub_jwk_ecdh.export_as_base64();
 
     let proxy = format!("{proxy}/init-tunnel?backend={provider}");
 
+    let uuid = Uuid::new_v4().to_string();
     let res = reqwest::Client::new()
         .post(&proxy)
         .headers({
             let mut headers = reqwest::header::HeaderMap::new();
-
-            let uuid = Uuid::new_v4().to_string();
-            HTTP_UUID.with_borrow_mut(|val| {
-                val.insert(_provider_url, uuid.clone());
-            });
-
             headers.insert(
                 "x-ecdh-init",
                 HeaderValue::from_str(&b64_pub_jwk).expect_throw("expected b64_pub_jwk to be a valid header value; qed"),
@@ -548,7 +616,6 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         })?;
 
     if res.status().eq(&401) {
-        HTTP_ENCRYPTED_TUNNEL_FLAG.set(false);
         return Err(String::from("401 response from proxy, user is not authorized."));
     }
 
@@ -565,17 +632,34 @@ async fn init_tunnel(provider: &str, proxy: &str) -> Result<(), String> {
         val.to_string()
     })?;
 
-    HTTP_UP_JWT.set(
-        proxy_data
-            .remove("up-JWT")
-            .ok_or("up_jwt not found")?
-            .as_str()
-            .expect_throw("we expect the data type of tje jwt to be a string")
-            .to_string(),
-    );
+    let up_jwt = proxy_data
+        .remove("up-JWT")
+        .ok_or("up_jwt not found")?
+        .as_str()
+        .expect_throw("we expect the data type of tje jwt to be a string")
+        .to_string();
 
-    HTTP_USER_SYMMETRIC_KEY.set(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
-    HTTP_ENCRYPTED_TUNNEL_FLAG.set(true);
+    // HTTP_UP_JWT.set();
+    // HTTP_USER_SYMMETRIC_KEY.set(Some(private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?));
+    // HTTP_ENCRYPTED_TUNNEL_FLAG.set(true);
+
+    let symmetric_key = private_jwk_ecdh.get_ecdh_shared_secret(&jwk_from_map(proxy_data)?)?;
+    GLOBAL_STATE.with_borrow_mut(|v| {
+        let instance = ClientInstance {
+            client_uuid: uuid,
+            static_paths: Vec::new(),
+            pub_priv_ecdh: (pub_jwk_ecdh, private_jwk_ecdh),
+            symmetric_key,
+            up_jwt,
+        };
+
+        match v.get_mut(provider) {
+            Some(val) => {
+                val.push(instance);
+            }
+            None => _ = v.insert(provider.to_string(), vec![instance]),
+        }
+    });
 
     console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
     Ok(())
@@ -593,7 +677,8 @@ pub(crate) fn rebuild_url(url: &str) -> String {
 }
 
 async fn assert_tunnel_is_open(provider_url: &str) -> Result<(), JsError> {
-    if HTTP_ENCRYPTED_TUNNEL_FLAG.with_borrow(|v| *v) {
+    let tunnel_encrypted = GLOBAL_STATE.with_borrow(|v| v.get(provider_url).map_or(false, |v| !v.is_empty()));
+    if tunnel_encrypted {
         return Ok(());
     }
 
