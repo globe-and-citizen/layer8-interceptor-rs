@@ -59,7 +59,7 @@ impl NetworkState {
             }
         }
 
-        return Err(err_cache);
+        Err(err_cache)
     }
 
     /// This function is called to retrieve the static file.
@@ -83,7 +83,7 @@ impl NetworkState {
             }
         }
 
-        return Err(err_cache);
+        Err(err_cache)
     }
 }
 
