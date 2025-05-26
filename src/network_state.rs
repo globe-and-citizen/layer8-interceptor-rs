@@ -44,7 +44,8 @@ impl NetworkState {
     pub async fn fetch(&mut self, url: String, options: JsValue) -> Result<Response, JsError> {
         let mut err_cache = JsError::new("");
         for _ in 1..=3 {
-            match self.fetch_(url.clone(), options.clone()).await {
+            let network_state = self.clone(); // clone guard
+            match network_state.fetch_(url.clone(), options.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -53,7 +54,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    let new_network_state = Self::new(&url, &self.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    let new_network_state = Self::new(&url, &network_state.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                     *self = new_network_state;
                 }
             }
@@ -68,7 +69,8 @@ impl NetworkState {
     pub async fn get_static(&mut self, url: String) -> Result<String, JsError> {
         let mut err_cache = JsError::new("");
         for _ in 1..=3 {
-            match self.get_static_(url.clone()).await {
+            let network_state = self.clone(); // clone guard
+            match network_state.get_static_(url.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -77,7 +79,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    let new_network_state = Self::new(&url, &self.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    let new_network_state = Self::new(&url, &network_state.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                     *self = new_network_state;
                 }
             }
