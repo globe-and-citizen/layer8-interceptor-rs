@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "layer8-interceptor-rs"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "base64",
  "js-sys",
@@ -726,8 +726,7 @@ dependencies = [
 [[package]]
 name = "layer8-primitives"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f349194438920a0cde9d48e6d44c155654239f5a2f61526ca99780ff2217113f"
+source = "git+https://github.com/globe-and-citizen/layer8-primitives-rs.git?branch=feat%2Fsend-status-to-caller#5e676c6361b1cb66f4e595e0e8921e27e3074325"
 dependencies = [
  "aes-gcm",
  "base64",
