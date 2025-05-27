@@ -36,6 +36,10 @@ pub struct NetworkState {
     pub(crate) client: Option<types::Client>,
     pub(crate) public_key_jwk: Jwk,
     pub(crate) private_key_jwk: Jwk,
+    // TODO:
+    // user_proxy_jwt
+    // provider_public_key
+    // ephemeral_client_key_pair
 }
 
 #[wasm_bindgen]
