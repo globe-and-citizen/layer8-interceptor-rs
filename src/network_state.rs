@@ -41,11 +41,15 @@ pub struct NetworkState {
 #[wasm_bindgen]
 impl NetworkState {
     /// This function is an override of the fetch function. It's arguments are a URL and an options object.
-    pub async fn fetch(&mut self, url: String, options: JsValue) -> Result<Response, JsError> {
+    pub async fn fetch(&self, url: String, options: JsValue) -> Result<Response, JsError> {
+        let mut network_state = PROVIDER_REGISTER
+            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
+            .unwrap_or(self.clone());
+        let proxy_url = network_state.proxy_url.clone();
+
         let mut err_cache = JsError::new("");
         for _ in 1..=3 {
-            let network_state = self.clone(); // clone guard
-            match network_state.fetch_(url.clone(), options.clone()).await {
+            match NetworkState::fetch_(&network_state, url.clone(), options.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -54,8 +58,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    let new_network_state = Self::new(&url, &network_state.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
-                    *self = new_network_state;
+                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -66,11 +69,15 @@ impl NetworkState {
     /// This function is called to retrieve the static file.
     /// It is expected to be called with a URL string.
     #[wasm_bindgen(js_name = _static)]
-    pub async fn get_static(&mut self, url: String) -> Result<String, JsError> {
+    pub async fn get_static(&self, url: String) -> Result<String, JsError> {
+        let mut network_state = PROVIDER_REGISTER
+            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
+            .unwrap_or(self.clone());
+        let proxy_url = network_state.proxy_url.clone();
         let mut err_cache = JsError::new("");
+
         for _ in 1..=3 {
-            let network_state = self.clone(); // clone guard
-            match network_state.get_static_(url.clone()).await {
+            match NetworkState::get_static_(&network_state, url.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -79,8 +86,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    let new_network_state = Self::new(&url, &network_state.proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
-                    *self = new_network_state;
+                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -388,7 +394,11 @@ impl NetworkState {
                 ("content-type".to_string(), "application/json".to_string()),
                 ("layer8-empty-body".to_string(), "true".to_string()),
             ]),
-            url_path: Some(url.clone()),
+            url_path: Some(
+                Url::parse(&url.clone())
+                    .map_err(|e| (-1, JsError::new(&format!("The url provided is invalid, {}", e))))?
+                    .to_string(),
+            ),
         };
 
         let res = {
