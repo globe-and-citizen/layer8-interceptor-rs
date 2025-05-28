@@ -23,32 +23,44 @@ use crate::{
     js_glue::js_imports::parse_form_data_to_array,
 };
 
-#[wasm_bindgen]
 #[derive(Debug, Default, Clone)]
-pub struct NetworkState {
+pub(crate) struct NetworkState {
     // These environment values are essential for the tunnel to work
-    pub(crate) client_uuid: String,
-    pub(crate) symmetric_key: Jwk,
-    pub(crate) provider_session: String,
-    pub(crate) static_paths: Vec<String>,
+    pub client_uuid: String,
+    pub symmetric_key: Jwk,
+    pub provider_session: String,
+    pub static_paths: Vec<String>,
 
-    pub(crate) proxy_url: String,
-    pub(crate) client: Option<types::Client>,
-    pub(crate) public_key_jwk: Jwk,
-    pub(crate) private_key_jwk: Jwk,
+    pub proxy_url: String,
+    pub client: Option<types::Client>,
+    pub public_key_jwk: Jwk,
+    pub private_key_jwk: Jwk,
     // TODO:
     // user_proxy_jwt
     // provider_public_key
     // ephemeral_client_key_pair
 }
 
+/// This is the object that the JS API interacts with. It is a marker for the ProviderRegistry to identify which
+/// NetworkState to use when doing the `fetch` and `get_static` operations.
 #[wasm_bindgen]
-impl NetworkState {
+pub struct NetworkStateHandler(pub(crate) String);
+
+#[wasm_bindgen]
+impl NetworkStateHandler {
     /// This function is an override of the fetch function. It's arguments are a URL and an options object.
     pub async fn fetch(&self, url: String, options: JsValue) -> Result<Response, JsError> {
+        let base_url = get_base_url(&url);
+        if base_url.ne(&self.0) {
+            return Err(JsError::new(&format!(
+                "the NetworkStateHandler if for `{}` but we're calling the url `{}` instead",
+                self.0, base_url
+            )));
+        }
+
         let mut network_state = PROVIDER_REGISTER
-            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
-            .unwrap_or(self.clone());
+            .with_borrow(|map| map.get(&self.0).cloned())
+            .expect_throw("we expect the NetworkState to be present since the handler exists");
         let proxy_url = network_state.proxy_url.clone();
 
         let mut err_cache = JsError::new("");
@@ -62,7 +74,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    network_state = NetworkState::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -74,9 +86,17 @@ impl NetworkState {
     /// It is expected to be called with a URL string.
     #[wasm_bindgen(js_name = _static)]
     pub async fn get_static(&self, url: String) -> Result<String, JsError> {
+        let base_url = get_base_url(&url);
+        if base_url.ne(&self.0) {
+            return Err(JsError::new(&format!(
+                "the NetworkStateHandler if for `{}` but we're calling the url `{}` instead",
+                self.0, base_url
+            )));
+        }
+
         let mut network_state = PROVIDER_REGISTER
-            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
-            .unwrap_or(self.clone());
+            .with_borrow(|map| map.get(&self.0).cloned())
+            .expect_throw("we expect the NetworkState to be present since the handler exists");
         let proxy_url = network_state.proxy_url.clone();
         let mut err_cache = JsError::new("");
 
@@ -90,7 +110,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    network_state = NetworkState::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -101,7 +121,7 @@ impl NetworkState {
 
 impl NetworkState {
     /// This operation initializes a new NetworkState. It updates
-    pub async fn new(provider_url: &str, proxy_url: &str) -> Result<Self, String> {
+    pub(crate) async fn new(provider_url: &str, proxy_url: &str) -> Result<Self, String> {
         let mut network_state = NetworkState::default();
 
         // Adding the client and the proxy url to the network_state

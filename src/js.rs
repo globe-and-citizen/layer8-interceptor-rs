@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap};
 use wasm_bindgen::prelude::*;
 
 use crate::js_imports_prelude::*;
-use crate::network_state::NetworkState;
+use crate::network_state::{NetworkState, NetworkStateHandler};
 use crate::types::{DbCache, InitConfig, Uniqueness};
 
 const INTERCEPTOR_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -12,6 +12,7 @@ pub(crate) const INDEXED_DB_CACHE: &str = "_layer8cache";
 pub(crate) const INDEXED_DB_CACHE_TTL: i32 = 60 * 60 * 24 * 2 * 1000; // 2 days in milliseconds
 
 thread_local! {
+    /// This is the cache for all the NetworkStates present. It is the single source of truth for the state of the system.
     pub(crate) static PROVIDER_REGISTER: RefCell<HashMap<String, NetworkState>> = RefCell::new(HashMap::new());
 
     static COUNTER: RefCell<i32> = const { RefCell::new(0) };
@@ -93,7 +94,7 @@ pub async fn persistence_check() -> i32 {
 /// ```
 #[allow(non_snake_case)]
 #[wasm_bindgen(js_name = initEncryptedTunnel)]
-pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String>) -> Result<NetworkState, JsError> {
+pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String>) -> Result<NetworkStateHandler, JsError> {
     console_log!(&format!("Interceptor version is {}", INTERCEPTOR_VERSION));
 
     let init_config = InitConfig::new(init_config).await?;
@@ -108,24 +109,19 @@ pub async fn init_encrypted_tunnel(init_config: js_sys::Object, _: Option<String
     let provider = get_base_url(&init_config.provider);
 
     // before we initialize creation of a client check if one is already linked with the provider
-    let network_state = match PROVIDER_REGISTER.with_borrow_mut(|map| map.get(&provider).cloned()) {
-        Some(val) => val,
-        None => {
-            console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
-            let mut network_state = NetworkState::new(&provider, &init_config.proxy).await.map_err(|e| {
-                console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
-                JsError::new(&e)
-            })?;
+    if PROVIDER_REGISTER.with_borrow_mut(|map| map.get(&provider).cloned()).is_none() {
+        console_log!(&format!("Establishing encrypted tunnel with provider: {}", provider));
+        let mut network_state = NetworkState::new(&provider, &init_config.proxy).await.map_err(|e| {
+            console_error!(&format!("Failed to establish encrypted tunnel with provider: {}. Error: {}", provider, e));
+            JsError::new(&e)
+        })?;
 
-            network_state.static_paths = init_config.static_paths;
-            PROVIDER_REGISTER.with_borrow_mut(|map| map.insert(provider.clone(), network_state.clone()));
-            network_state
-        }
-    };
+        network_state.static_paths = init_config.static_paths;
+        PROVIDER_REGISTER.with_borrow_mut(|map| map.insert(provider.clone(), network_state.clone()));
+    }
 
     console_log!(&format!("Encrypted tunnel established with provider: {}", provider));
-
-    Ok(network_state)
+    Ok(NetworkStateHandler(provider))
 }
 
 pub(crate) fn get_base_url(url: &str) -> String {
