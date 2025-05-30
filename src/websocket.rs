@@ -12,7 +12,7 @@ use layer8_primitives::{
     types::{Layer8Envelope, WebSocketPayload},
 };
 
-use crate::{js::rebuild_url, js_imports_prelude::*};
+use crate::{js::get_base_url, js_imports_prelude::*};
 
 thread_local! {
     // This static variable will help us keep track of our websocket wrapper.
@@ -129,7 +129,7 @@ struct WasmWebSocketRef(String);
 impl WasmWebSocket {
     async fn init_(options: js_sys::Object) -> Result<WasmWebSocketRef, JsValue> {
         let options = InitConfig::new(options)?;
-        let rebuilt_url = rebuild_url(&options.url);
+        let rebuilt_url = get_base_url(&options.url);
 
         // if already present & in open state, return the existing socket ref
         if let Some(val) = LAYER8_SOCKETS.with_borrow_mut(|val| match val.get(&rebuilt_url) {
@@ -479,7 +479,7 @@ impl WasmWebSocketRef {
         };
 
         let client_uuid = WS_UUID
-            .with_borrow(|v| v.get(&rebuild_url(&self.0)).cloned())
+            .with_borrow(|v| v.get(&get_base_url(&self.0)).cloned())
             .ok_or(JsValue::from("could not find a client_uuid for the provided id"))?;
 
         let mut ws_exchange = WebSocketPayload {
@@ -515,7 +515,7 @@ impl WasmWebSocketRef {
         }
 
         LAYER8_SOCKETS.with_borrow_mut(|v| {
-            let ws = v.get_mut(&rebuild_url(self.0.as_str())).ok_or("Socket not found")?;
+            let ws = v.get_mut(&get_base_url(self.0.as_str())).ok_or("Socket not found")?;
             let data = serde_json::to_vec(&Layer8Envelope::WebSocket(ws_exchange)).map_err(|e| e.to_string())?;
             ws.socket.send_with_u8_array(&data)
         })

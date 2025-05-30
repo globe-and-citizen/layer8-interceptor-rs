@@ -1,11 +1,9 @@
 BEGIN {
     packageInsert = "\"./snippets/*\", "
 
-    jsAppend = "import { _static, checkEncryptedTunnel, fetch, testWASM, persistenceCheck, initEncryptedTunnel } from \"./layer8_interceptor_rs.js\";\n" \
+    jsAppend = "import { checkEncryptedTunnel, testWASM, persistenceCheck, initEncryptedTunnel } from \"./layer8_interceptor_rs.js\";\n" \
                "export default {\n" \
-               "    static: _static,\n" \
                "    checkEncryptedTunnel,\n" \
-               "    fetch,\n" \
                "    testWASM,\n" \
                "    persistenceCheck,\n" \
                "    initEncryptedTunnel,\n" \

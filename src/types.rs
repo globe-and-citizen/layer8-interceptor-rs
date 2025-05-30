@@ -16,10 +16,10 @@ thread_local! {
 /// The config object is expected to have the following structure:
 /// ```js
 /// export interface InitConfig {
-///    // The list of providers to establish the encrypted tunnel with.
-///    providers:   string[];
+///    // The provider to establish the encrypted tunnel with.
+///    provider:   string;
 ///    // The proxy URL to establish the encrypted tunnel.
-///    proxy:       string;
+///    proxy:      string;
 ///    // Deprecated: `staticPath` is used for backwards compatibility, use `staticPaths` instead.
 ///    staticPath:  string | undefined;
 ///    // The list of paths to serve static assets from.
@@ -32,7 +32,7 @@ thread_local! {
 pub(crate) struct InitConfig {
     pub(crate) proxy: String,
     pub(crate) static_paths: Vec<String>,
-    pub(crate) providers: Vec<String>,
+    pub(crate) provider: String,
 }
 
 impl InitConfig {
@@ -43,18 +43,11 @@ impl InitConfig {
         for entry in entries.iter() {
             let val = js_sys::Array::from(&entry); // [key, value] result from Object.entries
             match val.get(0).as_string().ok_or(JsError::new("expected object key to be a string"))?.as_str() {
-                "providers" => {
-                    if !val.get(1).is_instance_of::<js_sys::Array>() {
-                        return Err(JsError::new("expected `InitConfig.providers` value to be an array"));
-                    }
-
-                    for provider in js_sys::Array::from(&val.get(1)).iter() {
-                        init_config.providers.push(
-                            provider
-                                .as_string()
-                                .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?,
-                        )
-                    }
+                "provider" => {
+                    init_config.provider = val
+                        .get(1)
+                        .as_string()
+                        .ok_or(JsError::new("expected `InitConfig.provider` value to be a string"))?;
                 }
 
                 "proxy" => {
