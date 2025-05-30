@@ -1,9 +1,9 @@
 name: Publish to npm
 
 on:
-  pull_request: # Testing experimental npm publishes
-  # release:
-  #   types: [created]
+  release:
+    types: [created]
+
 jobs:
   publish:
     runs-on: ubuntu-latest

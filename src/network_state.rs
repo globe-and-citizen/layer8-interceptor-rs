@@ -23,37 +23,49 @@ use crate::{
     js_glue::js_imports::parse_form_data_to_array,
 };
 
-#[wasm_bindgen]
 #[derive(Debug, Default, Clone)]
-pub struct NetworkState {
+pub(crate) struct NetworkState {
     // These environment values are essential for the tunnel to work
-    pub(crate) client_uuid: String,
-    pub(crate) symmetric_key: Jwk,
-    pub(crate) provider_session: String,
-    pub(crate) static_paths: Vec<String>,
+    pub client_uuid: String,
+    pub symmetric_key: Jwk,
+    pub provider_session: String,
+    pub static_paths: Vec<String>,
 
-    pub(crate) proxy_url: String,
-    pub(crate) client: Option<types::Client>,
-    pub(crate) public_key_jwk: Jwk,
-    pub(crate) private_key_jwk: Jwk,
+    pub proxy_url: String,
+    pub client: Option<types::Client>,
+    pub public_key_jwk: Jwk,
+    pub private_key_jwk: Jwk,
     // TODO:
     // user_proxy_jwt
     // provider_public_key
     // ephemeral_client_key_pair
 }
 
+/// This is the object that the JS API interacts with. It is a marker for the ProviderRegistry to identify which
+/// NetworkState to use when doing the `fetch` and `get_static` operations.
 #[wasm_bindgen]
-impl NetworkState {
+pub struct NetworkStateHandler(pub(crate) String);
+
+#[wasm_bindgen]
+impl NetworkStateHandler {
     /// This function is an override of the fetch function. It's arguments are a URL and an options object.
     pub async fn fetch(&self, url: String, options: JsValue) -> Result<Response, JsError> {
+        let base_url = get_base_url(&url);
+        if base_url.ne(&self.0) {
+            return Err(JsError::new(&format!(
+                "the NetworkStateHandler is for `{}` but we're calling the url `{}` instead",
+                self.0, base_url
+            )));
+        }
+
         let mut network_state = PROVIDER_REGISTER
-            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
-            .unwrap_or(self.clone());
+            .with_borrow(|map| map.get(&self.0).cloned())
+            .expect_throw("we expect the NetworkState to be present since the handler exists");
         let proxy_url = network_state.proxy_url.clone();
 
         let mut err_cache = JsError::new("");
         for _ in 1..=3 {
-            match NetworkState::fetch_(&network_state, url.clone(), options.clone()).await {
+            match network_state.fetch(url.clone(), options.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -62,7 +74,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    network_state = NetworkState::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -74,14 +86,22 @@ impl NetworkState {
     /// It is expected to be called with a URL string.
     #[wasm_bindgen(js_name = _static)]
     pub async fn get_static(&self, url: String) -> Result<String, JsError> {
+        let base_url = get_base_url(&url);
+        if base_url.ne(&self.0) {
+            return Err(JsError::new(&format!(
+                "the NetworkStateHandler if for `{}` but we're calling the url `{}` instead",
+                self.0, base_url
+            )));
+        }
+
         let mut network_state = PROVIDER_REGISTER
-            .with_borrow(|map| map.get(&get_base_url(&url)).cloned())
-            .unwrap_or(self.clone());
+            .with_borrow(|map| map.get(&self.0).cloned())
+            .expect_throw("we expect the NetworkState to be present since the handler exists");
         let proxy_url = network_state.proxy_url.clone();
         let mut err_cache = JsError::new("");
 
         for _ in 1..=3 {
-            match NetworkState::get_static_(&network_state, url.clone()).await {
+            match network_state.get_static(url.clone()).await {
                 Ok(val) => return Ok(val),
                 Err((status, err)) => {
                     if status == -1 || status >= 500 {
@@ -90,7 +110,7 @@ impl NetworkState {
                     }
 
                     err_cache = err;
-                    network_state = Self::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
+                    network_state = NetworkState::new(&url, &proxy_url).await.map_err(|e| JsError::new(e.as_str()))?;
                 }
             }
         }
@@ -101,7 +121,7 @@ impl NetworkState {
 
 impl NetworkState {
     /// This operation initializes a new NetworkState. It updates
-    pub async fn new(provider_url: &str, proxy_url: &str) -> Result<Self, String> {
+    pub(crate) async fn new(provider_url: &str, proxy_url: &str) -> Result<Self, String> {
         let mut network_state = NetworkState::default();
 
         // Adding the client and the proxy url to the network_state
@@ -114,8 +134,8 @@ impl NetworkState {
                 proxy_url.port().unwrap_or(443)
             );
 
-            network_state.client = Some(new_client(proxy_proxy).map_err(|e| e.to_string())?);
             network_state.proxy_url = proxy_url.to_string();
+            network_state.client = Some(new_client(proxy_proxy).map_err(|e| e.to_string())?);
         }
 
         // Create client_uuid and generate pub&priv key pair, add values to the network state
@@ -132,20 +152,17 @@ impl NetworkState {
         let b64_pub_jwk = network_state.public_key_jwk.export_as_base64();
         let proxy = format!("{}/init-tunnel?backend={}", get_base_url(&network_state.proxy_url), base_url);
 
-        console_log!(&format!("SEnding for {}", proxy));
-
         let res = reqwest::Client::new()
             .post(&proxy)
             .headers({
                 let mut headers = reqwest::header::HeaderMap::new();
-
                 headers.insert(
                     "x-ecdh-init",
-                    HeaderValue::from_str(&b64_pub_jwk).expect_throw("expected b64_pub_jwk to be a valid header value; qed"),
+                    HeaderValue::from_str(&b64_pub_jwk).expect_throw("expected b64_pub_jwk to be a valid header value"),
                 );
                 headers.insert(
                     "x-client-uuid",
-                    HeaderValue::from_str(&network_state.client_uuid).expect_throw("expected uuid to be a valid header value; qed"),
+                    HeaderValue::from_str(&network_state.client_uuid).expect_throw("expected uuid to be a valid header value"),
                 );
                 headers
             })
@@ -190,123 +207,15 @@ impl NetworkState {
         Ok(network_state)
     }
 
-    async fn fetch_(&self, url: String, options: JsValue) -> Result<Response, (i16, JsError)> {
-        let mut req_metadata = types::RequestMetadata {
-            method: "GET".to_string(),
-            url_path: Some(url.clone()),
-            ..Default::default()
-        };
-
-        let mut req = types::Request { ..Default::default() };
-
-        let mut js_body = JsValue::null();
-        if !options.is_null() && !options.is_undefined() {
-            let options = Object::from(options);
-            // [[key, value], ...] result from Object.entries
-            let entries = object_entries(&options);
-
-            for entry in entries.iter() {
-                // [key, value] item array
-                let key_value_entry = js_sys::Array::from(&entry);
-                let key = key_value_entry.get(0);
-                let value = key_value_entry.get(1);
-                if key.is_null() || key.is_undefined() || !key.is_string() {
-                    continue;
-                }
-
-                let key = key.as_string().expect_throw("key is a string; qed");
-
-                match key.to_lowercase().as_str() {
-                    "method" => {
-                        req_metadata.method = value.as_string().unwrap_or("GET".to_string());
-                    }
-                    "headers" => {
-                        let headers = object_entries(Object::try_from(&value).expect_throw("expected headers to be a [key, val] object array; qed"));
-
-                        headers.iter().for_each(|header| {
-                            let header_entries = js_sys::Array::from(&header);
-                            let header_name = header_entries.get(0).as_string().expect_throw("key is a string; qed");
-                            if header_name.trim().eq_ignore_ascii_case("content-length") {
-                                return;
-                            }
-
-                            req_metadata
-                                .headers
-                                .insert(header_name, header_entries.get(1).as_string().expect_throw("value is a string; qed"));
-                        });
-                    }
-                    "body" => {
-                        js_body = value;
-                        if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
-                            req_metadata.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            // if content type is not provided, we default to "application/json"
-            if !req_metadata.headers.iter().any(|(k, _)| k.trim().eq_ignore_ascii_case("Content-Type")) {
-                req_metadata.headers.insert("Content-Type".to_string(), "application/json".to_string());
-            }
-        }
-
-        let backend_url = get_base_url(&url);
-
-        // we don't care about the content-type; as long as the data is encrypted and custom protocols like websockets
-        // and other upgrades are handled by separate extensions logic; see [`websocket::WasmWebSocket`]
-        if !js_body.is_null() && !js_body.is_undefined() {
-            match js_body {
-                x if x.is_string() => {
-                    let value = x
-                        .as_string()
-                        .expect_throw("check asserted; js_body is an instance of String; qed")
-                        .to_string();
-                    req.body = value.as_bytes().to_vec();
-                }
-
-                x if x.is_instance_of::<Blob>() => {
-                    let reader = FileReaderSync::new().expect_throw("Failed to create FileReaderSync");
-                    let array = reader
-                        .read_as_array_buffer(&x.dyn_into::<Blob>().expect_throw("check asserted, js_body is an instance of Blob; qed"))
-                        .map_err(|e| (-1, JsError::new(&e.as_string().unwrap_throw())))?;
-                    req.body = Uint8Array::new(&array).to_vec()
-                }
-
-                x if x.is_instance_of::<ArrayBuffer>() => req.body = Uint8Array::new(&x.dyn_into::<ArrayBuffer>().unwrap_throw()).to_vec(),
-
-                x if x.is_instance_of::<Uint8Array>() => req.body = x.dyn_into::<Uint8Array>().unwrap_throw().to_vec(),
-
-                x if x.is_instance_of::<FormData>() => {
-                    console_log!("FormData detected");
-                    let boundary = format!("---------------------------{}", Uuid::new_v4());
-
-                    // we expect it to be Uint8Array
-                    let val = parse_form_data_to_array(x.dyn_into::<FormData>().unwrap_throw(), boundary.clone())
-                        .await
-                        .map_err(|e| (-1, JsError::new(&format!("Failed to parse FormData: {:?}", e))))?
-                        .dyn_into::<Uint8Array>()
-                        .map_err(|e| (-1, JsError::new(&format!("Failed to convert FormData to Uint8Array: {:?}", e))))?;
-
-                    console_log!(&format!("Form body length: {}", val.length()));
-                    req.body = val.to_vec();
-                    req_metadata
-                        .headers
-                        .insert("Content-Type".to_string(), format!("multipart/form-data; boundary={}", boundary));
-                }
-
-                _ => {
-                    console_error!(&format!("Could not determine the datatype of the body: {:?}", js_body));
-                    console_log!(&format!("Debug value: {:?}", js_body.js_typeof()));
-                    return Err((-1, JsError::new("Unsupported data type")));
-                }
-            }
-        }
+    async fn fetch(&self, url: String, options: JsValue) -> Result<Response, (i16, JsError)> {
+        let (js_body, mut req_metadata) = retrieve_body_and_req_metadata(&url, options).map_err(|e| (-1, e))?;
+        let req = generate_req_from_js_body(js_body, &mut req_metadata).await.map_err(|e| (-1, e))?;
 
         if req.body.is_empty() {
             req_metadata.headers.insert("layer8-empty-body".to_string(), "true".to_string());
         }
 
+        let base_url = get_base_url(&url);
         req_metadata.url_path = Some(url.clone());
         let res = match self
             .client
@@ -315,8 +224,8 @@ impl NetworkState {
             .r#do(
                 (&req, &req_metadata),
                 &self.symmetric_key,
-                &backend_url,
-                true,
+                &base_url,
+                false,
                 &self.provider_session,
                 &self.client_uuid,
             )
@@ -326,17 +235,17 @@ impl NetworkState {
             Err((status, e)) => {
                 return Err((
                     status,
-                    JsError::new(&format!("Failed to fetch: {}. With request_metadata {:?}", e, req_metadata)),
+                    JsError::new(&format!("failed to fetch: {},  with request_metadata {:?}", e, req_metadata)),
                 ));
             }
         };
 
         let response_init = ResponseInit::new();
-        let headers = web_sys::Headers::new().expect_throw("expected headers to be created; qed");
+        let headers = web_sys::Headers::new().expect_throw("expected headers to be created");
         for (key, value) in res.headers.iter() {
             headers
                 .append(key, value)
-                .expect_throw("expected headers to be appended to the web_sys::Headers object; qed");
+                .expect_throw("expected headers to be appended to the web_sys::Headers object");
         }
 
         response_init.set_headers(&headers);
@@ -355,7 +264,7 @@ impl NetworkState {
     }
 
     // This marker is &mut because: <>
-    async fn get_static_(&self, url: String) -> Result<String, (i16, JsError)> {
+    async fn get_static(&self, url: String) -> Result<String, (i16, JsError)> {
         if url.is_empty() {
             return Err((-1, JsError::new("Invalid url provided to fetch call")));
         }
@@ -370,11 +279,11 @@ impl NetworkState {
                 }
             }
             Err(e) => {
-                console_log!(&format!("error is {:?}", e));
+                console_log!(&format!("IndexDB error {:?}", e));
                 return Err((
                     -1,
                     JsError::new(&format!(
-                        "Error occurred interacting with IndexDB: {}",
+                        "error interacting with IndexDB: {}",
                         e.as_string().unwrap_or(format!("error unwrappable: {:?}", e))
                     )),
                 ));
@@ -400,7 +309,7 @@ impl NetworkState {
             ]),
             url_path: Some(
                 Url::parse(&url.clone())
-                    .map_err(|e| (-1, JsError::new(&format!("The url provided is invalid, {}", e))))?
+                    .map_err(|e| (-1, JsError::new(&format!("url provided is invalid, {}", e))))?
                     .to_string(),
             ),
         };
@@ -429,7 +338,7 @@ impl NetworkState {
                 Err((status, e)) => {
                     return Err((
                         status,
-                        JsError::new(&format!("Failed to fetch: {}\nWith request metadata {:?}", e, req_metadata)),
+                        JsError::new(&format!("f to fetch: {}, with request metadata {:?}", e, req_metadata)),
                     ));
                 }
             }
@@ -437,9 +346,8 @@ impl NetworkState {
 
         let file_type = {
             let file_type = res.headers.iter().find(|(k, _)| k.trim().eq_ignore_ascii_case("Content-Type"));
-
             match file_type {
-                Some(val) => val.1.clone(),
+                Some((_, val)) => val.clone(),
                 None => {
                     return Err((-1, JsError::new("Content-Type header not found.")));
                 }
@@ -486,4 +394,121 @@ impl NetworkState {
         console_log!(&format!("Object URL: {:?}", object_url));
         Ok(object_url)
     }
+}
+
+async fn generate_req_from_js_body(js_body: JsValue, req_metadata: &mut types::RequestMetadata) -> Result<types::Request, JsError> {
+    let mut req = types::Request::default();
+
+    // we don't care about the content-type; as long as the data is encrypted and custom protocols like websockets
+    // and other upgrades are handled by separate extensions logic; see [`websocket::WasmWebSocket`]
+    if js_body.is_null() || js_body.is_undefined() {
+        console_log!("No body provided, using empty body");
+        return Ok(req);
+    }
+
+    match js_body {
+        x if x.is_string() => {
+            let value = x.as_string().expect_throw("check asserted; js_body is an instance of String").to_string();
+            req.body = value.as_bytes().to_vec();
+        }
+
+        x if x.is_instance_of::<Blob>() => {
+            let reader = FileReaderSync::new().expect_throw("failed to create FileReaderSync");
+            let array = reader
+                .read_as_array_buffer(&x.dyn_into::<Blob>().expect_throw("check asserted, js_body is an instance of Blob"))
+                .map_err(|e| JsError::new(&e.as_string().unwrap_or("failed to read a Blob instance".to_string())))?;
+            req.body = Uint8Array::new(&array).to_vec()
+        }
+
+        x if x.is_instance_of::<ArrayBuffer>() => req.body = Uint8Array::new(&x.dyn_into::<ArrayBuffer>().unwrap_throw()).to_vec(),
+
+        x if x.is_instance_of::<Uint8Array>() => req.body = x.dyn_into::<Uint8Array>().unwrap_throw().to_vec(),
+
+        x if x.is_instance_of::<FormData>() => {
+            console_log!("FormData detected");
+            let boundary = format!("---------------------------{}", Uuid::new_v4());
+
+            // we expect it to be Uint8Array
+            let val = parse_form_data_to_array(x.dyn_into::<FormData>().unwrap_throw(), boundary.clone())
+                .await
+                .map_err(|e| JsError::new(&format!("failed to parse FormData: {:?}", e)))?
+                .dyn_into::<Uint8Array>()
+                .map_err(|e| JsError::new(&format!("failed to convert FormData to Uint8Array: {:?}", e)))?;
+
+            console_log!(&format!("Form body length: {}", val.length()));
+            req.body = val.to_vec();
+            req_metadata
+                .headers
+                .insert("Content-Type".to_string(), format!("multipart/form-data; boundary={}", boundary));
+        }
+
+        _ => {
+            console_error!(&format!("Could not determine the datatype of the body: {:?}", js_body));
+            console_log!(&format!("Debug value: {:?}", js_body.js_typeof()));
+            return Err(JsError::new("unsupported data type"));
+        }
+    }
+
+    Ok(req)
+}
+
+fn retrieve_body_and_req_metadata(url: &str, options: JsValue) -> Result<(JsValue, types::RequestMetadata), JsError> {
+    let mut req_metadata = types::RequestMetadata {
+        method: "GET".to_string(),
+        url_path: Some(url.to_string()),
+        ..Default::default()
+    };
+
+    let mut js_body = JsValue::null();
+    if options.is_null() || options.is_undefined() {
+        return Ok((js_body, req_metadata));
+    }
+
+    let options = Object::from(options);
+    // [[key, value], ...] result from Object.entries
+    let entries = object_entries(&options);
+
+    for entry in entries.iter() {
+        // [key, value] item array
+        let key_value_entry = js_sys::Array::from(&entry);
+        let key = key_value_entry.get(0);
+        let value = key_value_entry.get(1);
+        if key.is_null() || key.is_undefined() || !key.is_string() {
+            continue;
+        }
+
+        let key = key.as_string().unwrap_throw().to_lowercase();
+        if key.as_str() == "method" {
+            req_metadata.method = value.as_string().unwrap_or("GET".to_string());
+        }
+
+        if key.as_str() == "headers" {
+            let headers = object_entries(Object::try_from(&value).expect_throw("expected headers to be a [key, val] object array"));
+            headers.iter().for_each(|header| {
+                let header_entries = js_sys::Array::from(&header);
+                let header_name = header_entries.get(0).as_string().expect_throw("expected header name as a string");
+
+                if header_name.trim().eq_ignore_ascii_case("content-length") {
+                    return;
+                }
+
+                let header_value = header_entries.get(1).as_string().expect_throw("expected header value as a string");
+                req_metadata.headers.insert(header_name, header_value);
+            });
+        }
+
+        if key.as_str() == "body" {
+            js_body = value;
+            if !js_body.is_null() && !js_body.is_undefined() && js_body.is_instance_of::<FormData>() {
+                req_metadata.headers.insert("Content-Type".to_string(), "multipart/form-data".to_string());
+            }
+        }
+    }
+
+    // if content type is not provided, we default to "application/json"
+    if !req_metadata.headers.iter().any(|(k, _)| k.trim().eq_ignore_ascii_case("Content-Type")) {
+        req_metadata.headers.insert("Content-Type".to_string(), "application/json".to_string());
+    }
+
+    Ok((js_body, req_metadata))
 }
